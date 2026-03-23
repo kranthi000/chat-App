@@ -1199,7 +1199,7 @@ export default function Register() {
 
         <div style={s.cardHeader}>
           <span style={s.cardEmoji}>✨</span>
-          <h1 style={s.cardTitle}>Create Account</h1>
+          <h1 style={s.cardTitle}>REGISTER</h1>
           <p style={s.cardSub}>Join the conversation</p>
         </div>
 

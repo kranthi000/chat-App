@@ -2102,7 +2102,7 @@ export default function OtpVerify() {
       await new Promise((r) => setTimeout(r, 1200)); // ← replace with: await verifyOtpService({ otp: code })
       setPhase("success");
       toast.success("Email verified! 🎉");
-      setTimeout(() => navigate("/chat"), 2000);
+      setTimeout(() => navigate("/"), 2000);
     } catch {
       toast.error("Invalid OTP. Try again.");
       triggerShake();

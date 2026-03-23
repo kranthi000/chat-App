@@ -13,7 +13,7 @@ const routes=createBrowserRouter([
     path:"/register",
     element:<Register></Register>
 },{
-    path:"/otp",
+    path:"/verify-otp",
     element:<Otp></Otp>
 }
 ])
