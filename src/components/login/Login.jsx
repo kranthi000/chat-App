@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useDispatch } from "react-redux";
 import toast, { Toaster } from "react-hot-toast";
+import { useNavigate } from "react-router-dom";
 
 /* ─────────────────────────────────────────────────────────────
    SVG ICONS
@@ -158,6 +159,7 @@ export default function Login() {
   const [loading, setLoading]   = useState(false);
 
   const dispatch = useDispatch();
+   const navigate  = useNavigate();
 
   /* Walk-in → show form */
   useEffect(() => {
@@ -182,6 +184,8 @@ export default function Login() {
       // dispatch(addUser(response));
       toast.success("Welcome back! 🎉", toastCfg);
       setFormData({ email: "", password: "" });
+       setTimeout(() => navigate("/Chat"), 2000);
+
     } catch (err) {
       console.error(err);
       toast.error("Invalid email or password.", toastCfg);
