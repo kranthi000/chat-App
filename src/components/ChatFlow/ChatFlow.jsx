@@ -12,7 +12,7 @@ const SendIcon = () => (
   </svg>
 );
 
-const App = () => {
+const ChatFlow = () => {
   const [activeChat, setActiveChat] = useState(1);
   const [activeTab, setActiveTab] = useState("chats");
   const [activeGroup, setActiveGroup] = useState(101);
@@ -785,4 +785,4 @@ const App = () => {
   );
 };
 
-export default App;
+export default ChatFlow;
