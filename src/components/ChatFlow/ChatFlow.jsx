@@ -1,4 +1,6 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
+import EmojiPicker from 'emoji-picker-react';
+import { getMeService, getAllUsersService } from "../../services/service";
 
 const SearchIcon = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -27,19 +29,31 @@ const ChatFlow = () => {
   const [settings, setSettings] = useState({ notifications: true, darkMode: true });
   const [myProfile, setMyProfile] = useState({
     name: "Sai Krishna",
+    email: "loading...",
     role: "Software Engineer",
-    avatar: "https://i.pravatar.cc/150?u=me"
+    avatar: "https://i.pravatar.cc/150?u=me",
+    status: "online"
   });
 
-  const contacts = [
+  const [contacts, setContacts] = useState([
     { id: 1, name: "Alice Freeman", message: "That's a great idea! 🚀", time: "10:30 AM", unread: 2, online: true, avatar: "https://i.pravatar.cc/150?u=1" },
     { id: 2, name: "Bob Smith", message: "See you at 5 then.", time: "09:15 AM", unread: 0, online: true, avatar: "https://i.pravatar.cc/150?u=2" },
     { id: 3, name: "Charlie Davis", message: "Can you send the design files?", time: "Yesterday", unread: 0, online: false, avatar: "https://i.pravatar.cc/150?u=3" },
     { id: 4, name: "Diana Prince", message: "Thanks for the heads up.", time: "Yesterday", unread: 0, online: false, avatar: "https://i.pravatar.cc/150?u=4" },
     { id: 5, name: "Evan Wright", message: "I'll look into it right away.", time: "Monday", unread: 0, online: true, avatar: "https://i.pravatar.cc/150?u=5" },
-  ];
+  ]);
 
-  const messagesData = {
+  const [messageInput, setMessageInput] = useState("");
+  const messagesEndRef = useRef(null);
+  
+  const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [viewingImage, setViewingImage] = useState(null);
+  const [viewingDocument, setViewingDocument] = useState(null);
+  const fileInputRef = useRef(null);
+  const imageInputRef = useRef(null);
+
+  const [messagesData, setMessagesData] = useState({
     1: [
       { id: 1, text: "Hey! How's it going with the new landing page?", sender: "them", time: "10:20 AM" },
       { id: 2, text: "Good! Just reviewing the new premium dark mode designs. 🎨", sender: "me", time: "10:25 AM" },
@@ -58,7 +72,52 @@ const ChatFlow = () => {
     5: [
       { id: 1, text: "I'll look into it right away.", sender: "them", time: "Monday" }
     ]
-  };
+  });
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messagesData, activeChat]);
+
+  // Fetch profiles and contacts from MongoDB
+  useEffect(() => {
+    const fetchData = async () => {
+      const token = localStorage.getItem("chat_token");
+      if (!token) return;
+
+      try {
+        // Fetch current user
+        const me = await getMeService(token);
+        if (me) {
+          setMyProfile({
+            name: me.name || "User",
+            email: me.email || "No email",
+            role: me.role || "Member",
+            avatar: me.profileImage || me.avatar || "https://i.pravatar.cc/150?u=me",
+            status: "online"
+          });
+        }
+
+        // Fetch all users
+        const allUsers = await getAllUsersService(token);
+        if (allUsers && Array.isArray(allUsers)) {
+          const formattedContacts = allUsers.map((u, index) => ({
+            id: u._id || index + 1,
+            name: u.name,
+            message: u.lastMessage || "Hey there!",
+            time: u.lastTime || "Just now",
+            unread: 0,
+            online: u.status === "online",
+            avatar: u.profileImage || u.avatar || `https://i.pravatar.cc/150?u=${index + 1}`
+          }));
+          setContacts(formattedContacts);
+        }
+      } catch (err) {
+        console.error("Error fetching chat data:", err);
+      }
+    };
+
+    fetchData();
+  }, []);
 
   const groupsMock = [
     { id: 101, name: "10th Class", message: "Teacher: Don't forget the assignment.", time: "11:00 AM", unread: 5, avatar: "https://ui-avatars.com/api/?name=10th+Class&background=6366f1&color=fff" },
@@ -108,6 +167,77 @@ const ChatFlow = () => {
   }
 
 
+  const handleSendMessage = () => {
+    if (!messageInput.trim()) return;
+    
+    const now = new Date();
+    let hours = now.getHours();
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12;
+    hours = hours ? hours : 12; 
+    let minutes = now.getMinutes().toString().padStart(2, '0');
+    const timeString = `${hours}:${minutes} ${ampm}`;
+    
+    const newMessage = {
+      id: Date.now(),
+      text: messageInput.trim(),
+      sender: "me",
+      time: timeString
+    };
+
+    setMessagesData(prev => ({
+      ...prev,
+      [activeChat]: [...(prev[activeChat] || []), newMessage]
+    }));
+    
+    setMessageInput("");
+  };
+
+  const handleAttachmentSubmit = (e, type) => {
+    const files = Array.from(e.target.files);
+    if (!files.length) return;
+
+    const now = new Date();
+    let hours = now.getHours();
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12;
+    hours = hours ? hours : 12; 
+    let minutes = now.getMinutes().toString().padStart(2, '0');
+    const timeString = `${hours}:${minutes} ${ampm}`;
+
+    let imageUrls = [];
+    let documents = [];
+
+    files.forEach(file => {
+      if (type === 'image') {
+        imageUrls.push(URL.createObjectURL(file));
+      } else {
+        documents.push({
+          documentUrl: URL.createObjectURL(file),
+          documentName: file.name
+        });
+      }
+    });
+
+    const newMessage = {
+      id: Date.now(),
+      text: "",
+      imageUrls: imageUrls.length > 0 ? imageUrls : null,
+      documents: documents.length > 0 ? documents : null,
+      sender: "me",
+      time: timeString
+    };
+
+    setMessagesData(prev => ({
+      ...prev,
+      [activeChat]: [...(prev[activeChat] || []), newMessage]
+    }));
+    
+    // Reset inputs
+    if (fileInputRef.current) fileInputRef.current.value = "";
+    if (imageInputRef.current) imageInputRef.current.value = "";
+  };
+
   const currentMessages = messagesData[activeChat] || [
     { id: 99, text: "Hey! What's up?", sender: "them", time: "Just now" }
   ];
@@ -117,7 +247,69 @@ const ChatFlow = () => {
   );
 
   return (
-    <div className={`flex h-screen font-sans bg-gray-900 text-gray-100 overflow-hidden relative ${!settings.darkMode ? 'light-theme-active' : ''}`} style={{ backgroundImage: 'radial-gradient(circle at 50% 0%, #1f2937, #0B0F19 70%)' }}>
+    <div
+      className={`flex h-screen font-sans bg-gray-900 text-gray-100 overflow-hidden relative ${!settings.darkMode ? 'light-theme-active' : ''}`}
+      style={{ backgroundImage: 'radial-gradient(circle at 50% 0%, #1f2937, #0B0F19 70%)' }}
+      onClick={() => {
+        if (showProfilePopup) setShowProfilePopup(false);
+        if (isEditingProfile) setIsEditingProfile(false);
+        if (isSettingsOpen) setIsSettingsOpen(false);
+        if (showAttachmentMenu) setShowAttachmentMenu(false);
+        if (showEmojiPicker) setShowEmojiPicker(false);
+      }}
+    >
+
+      {/* Fullscreen Image Viewer Modal */}
+      {viewingImage && (
+        <div 
+          className="fixed inset-0 z-[300] bg-black/95 backdrop-blur-md flex items-center justify-center animate-fade-in p-4 sm:p-8" 
+          onClick={() => setViewingImage(null)}
+        >
+          <button 
+            className="absolute top-6 right-6 text-white/70 hover:text-white p-2.5 rounded-full bg-white/10 hover:bg-white/20 transition-all z-[310]"
+            onClick={() => setViewingImage(null)}
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+          </button>
+          <img 
+            src={viewingImage} 
+            alt="Fullscreen Attachment" 
+            className="max-w-full max-h-full object-contain rounded-xl shadow-[0_0_50px_rgba(0,0,0,0.5)] transform scale-100 animate-zoom-in ignore-theme" 
+            onClick={(e) => e.stopPropagation()} 
+          />
+        </div>
+      )}
+
+      {/* Fullscreen Document Viewer Modal */}
+      {viewingDocument && (
+        <div 
+          className="fixed inset-0 z-[300] bg-black/95 backdrop-blur-md flex items-center justify-center animate-fade-in p-4 sm:p-8" 
+          onClick={() => setViewingDocument(null)}
+        >
+          <button 
+            className="absolute top-6 right-6 text-white/70 hover:text-white p-2.5 rounded-full bg-white/10 hover:bg-white/20 transition-all z-[310]"
+            onClick={() => setViewingDocument(null)}
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+          </button>
+          
+          <div className="w-full h-full max-w-6xl max-h-[90vh] bg-[#f8f9fa] rounded-2xl shadow-[0_0_50px_rgba(0,0,0,0.5)] flex flex-col overflow-hidden animate-zoom-in ignore-theme" onClick={(e) => e.stopPropagation()}>
+             <div className="bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center text-gray-800 shadow-sm z-10">
+               <div className="flex items-center gap-3 overflow-hidden">
+                 <div className="w-10 h-10 shrink-0 bg-indigo-100 text-indigo-500 flex items-center justify-center rounded-xl">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                 </div>
+                 <span className="font-semibold text-lg truncate pr-4 text-gray-900 tracking-tight">{viewingDocument.name}</span>
+               </div>
+               <a href={viewingDocument.url} download={viewingDocument.name} className="flex shrink-0 items-center gap-2 text-sm font-bold text-white px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 rounded-xl transition-all shadow-md hover:shadow-lg active:scale-95">
+                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                 Download
+               </a>
+             </div>
+             <iframe src={viewingDocument.url} className="w-full flex-1 border-0 bg-gray-50/50" title="Document Viewer" />
+          </div>
+        </div>
+      )}
 
       {/* Status Viewer Modal */}
       {viewingStatus && (
@@ -378,144 +570,80 @@ const ChatFlow = () => {
         </div>
 
         {/* Bottom Profile */}
-        <div className="relative h-[90px] bg-[#0B0F19] bg-opacity-80 backdrop-blur-md p-6 flex items-center justify-between border-t border-gray-800">
-
-          {/* Profile Menu Popup */}
-          {showProfilePopup && !isEditingProfile && !isSettingsOpen && (
-            <div className="absolute bottom-[80px] left-4 w-64 bg-[#1F2937] border border-gray-700 rounded-2xl shadow-2xl p-4 z-50 transform transition-all duration-200">
-              <div className="flex items-center gap-3 mb-4 pb-4 border-b border-gray-700">
-                <div className="relative cursor-pointer group" onClick={() => { setIsEditingProfile(true); setShowProfilePopup(false); }}>
-                  <img src={myProfile.avatar} alt="Me" className="w-12 h-12 rounded-full border-2 border-indigo-500 shadow-sm group-hover:opacity-75 transition-opacity" />
-                  <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black bg-opacity-40 rounded-full">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
-                  </div>
+        {/* Bottom Profile - Modern Glassmorphism */}
+        <div className="px-5 py-4 mt-auto border-t border-gray-800/30 bg-[#0f1423]/40 backdrop-blur-md relative z-30">
+          
+          {/* Profile Menu Dropup */}
+          {showProfilePopup && (
+            <div 
+              className="absolute bottom-full left-5 right-5 mb-4 bg-[#1e293b]/95 backdrop-blur-2xl border border-white/10 rounded-2xl shadow-2xl p-2 z-[60] animate-in slide-in-from-bottom-5 duration-300"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center gap-3 p-3 border-b border-white/5 mb-1">
+                <div className="relative">
+                  <img src={myProfile.avatar} alt="Me" className="w-10 h-10 rounded-full border border-indigo-500/50 shadow-sm" />
+                  <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-[#1e293b] rounded-full shadow-sm"></div>
                 </div>
-                <div>
-                  <h3 className="font-bold text-white tracking-wide">{myProfile.name}</h3>
-                  <p className="text-xs text-gray-400 font-medium mt-0.5">{myProfile.role}</p>
+                <div className="overflow-hidden">
+                  <h3 className="text-sm font-bold text-white truncate">{myProfile.name}</h3>
+                  <p className="text-[10px] text-gray-400 truncate tracking-tight">{myProfile.email}</p>
                 </div>
               </div>
-              <div className="space-y-1.5">
-                <button
+              
+              <div className="space-y-0.5">
+                <button 
                   onClick={() => { setIsSettingsOpen(true); setShowProfilePopup(false); }}
-                  className="w-full text-left px-3 py-2 rounded-xl text-sm font-medium text-gray-300 hover:bg-gray-800 hover:text-white transition-colors"
+                  className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium text-gray-300 hover:bg-white/5 hover:text-white transition-all active:scale-[0.98]"
                 >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
                   Account Settings
                 </button>
-                <button className="w-full text-left px-3 py-2 rounded-xl text-sm font-medium text-gray-300 hover:bg-gray-800 hover:text-white transition-colors">
+                <button className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium text-gray-300 hover:bg-white/5 hover:text-white transition-all active:scale-[0.98]">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
                   Set Status
                 </button>
-                <button className="w-full text-left px-3 py-2 rounded-xl text-sm font-medium text-red-400 hover:bg-red-500/10 hover:text-red-300 transition-colors mt-2">
-                  Log Out
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Edit Profile Popup */}
-          {isEditingProfile && (
-            <div className="absolute bottom-[80px] left-4 w-72 bg-[#1F2937] border border-gray-700 rounded-2xl shadow-2xl p-5 z-50 transform transition-all duration-200">
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-sm font-bold text-white uppercase tracking-wide">Edit Profile</h2>
-                <button onClick={() => setIsEditingProfile(false)} className="text-gray-400 hover:text-white transition-colors">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                </button>
-              </div>
-              <div className="flex items-center gap-4 mb-5">
-                <div className="relative group cursor-pointer flex-shrink-0">
-                  <img src={myProfile.avatar} alt="Avatar" className="w-14 h-14 rounded-full border-2 border-indigo-500 object-cover shadow-sm" />
-                  <div className="absolute inset-0 bg-black bg-opacity-50 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                    <span className="text-white text-[10px] font-bold">Change</span>
-                  </div>
-                </div>
-                <div className="w-full space-y-2">
-                  <input
-                    type="text"
-                    value={myProfile.name}
-                    onChange={(e) => setMyProfile({ ...myProfile, name: e.target.value })}
-                    className="w-full bg-[#111827] border border-gray-600 rounded-lg px-2.5 py-1.5 text-white text-xs outline-none focus:border-indigo-500 transition-all"
-                    placeholder="Display Name"
-                  />
-                  <input
-                    type="text"
-                    value={myProfile.role}
-                    onChange={(e) => setMyProfile({ ...myProfile, role: e.target.value })}
-                    className="w-full bg-[#111827] border border-gray-600 rounded-lg px-2.5 py-1.5 text-white text-xs outline-none focus:border-indigo-500 transition-all"
-                    placeholder="Role / Bio"
-                  />
-                </div>
-              </div>
-              <button
-                onClick={() => setIsEditingProfile(false)}
-                className="w-full py-2 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-400 hover:to-purple-500 transition-all shadow-md"
-              >
-                Save Changes
-              </button>
-            </div>
-          )}
-
-          {/* Settings Popup */}
-          {isSettingsOpen && (
-            <div className="absolute bottom-[80px] left-4 w-72 bg-[#1F2937] border border-gray-700 rounded-2xl shadow-2xl p-5 z-50 transform transition-all duration-200">
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-sm font-bold text-white uppercase tracking-wide">Settings</h2>
-                <button onClick={() => setIsSettingsOpen(false)} className="text-gray-400 hover:text-white transition-colors">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                </button>
-              </div>
-              <div className="space-y-2">
-                <div className="flex items-center justify-between p-2.5 bg-[#111827] rounded-xl border border-gray-700 cursor-pointer" onClick={() => setSettings({ ...settings, notifications: !settings.notifications })}>
-                  <div>
-                    <h3 className="text-sm font-medium text-white select-none">Notifications</h3>
-                  </div>
-                  <div className={`w-8 h-4 rounded-full flex items-center px-0.5 transition-colors duration-300 ${settings.notifications ? 'bg-indigo-500' : 'bg-gray-600'}`}>
-                    <div className={`w-3 h-3 bg-white rounded-full shadow-sm transform transition-transform duration-300 ${settings.notifications ? 'translate-x-4' : 'translate-x-0'}`}></div>
-                  </div>
-                </div>
-                <div className="flex items-center justify-between p-2.5 bg-[#111827] rounded-xl border border-gray-700 cursor-pointer" onClick={() => setSettings({ ...settings, darkMode: !settings.darkMode })}>
-                  <div>
-                    <h3 className="text-sm font-medium text-white select-none">Dark Mode</h3>
-                  </div>
-                  <div className={`w-8 h-4 rounded-full flex items-center px-0.5 transition-colors duration-300 ${settings.darkMode ? 'bg-indigo-500' : 'bg-gray-600'}`}>
-                    <div className={`w-3 h-3 bg-white rounded-full shadow-sm transform transition-transform duration-300 ${settings.darkMode ? 'translate-x-4' : 'translate-x-0'}`}></div>
-                  </div>
-                </div>
-                <div className="flex items-center justify-between p-2.5 bg-[#111827] rounded-xl border border-gray-700 cursor-pointer hover:bg-gray-800 transition-colors">
-                  <h3 className="text-sm font-medium text-white">Privacy</h3>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                <div className="pt-1 mt-1 border-t border-white/5">
+                  <button 
+                    onClick={() => {
+                      localStorage.removeItem("chat_token");
+                      window.location.href = "/";
+                    }}
+                    className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-bold text-rose-400 hover:bg-rose-500/10 hover:text-rose-300 transition-all active:scale-[0.98]"
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+                    Log Out
+                  </button>
                 </div>
               </div>
             </div>
           )}
 
-          <div
-            className="flex items-center gap-3 cursor-pointer hover:bg-gray-800/50 p-2 -ml-2 rounded-xl transition-all w-full mr-2"
-            onClick={() => {
-              if (isEditingProfile || isSettingsOpen) {
-                setIsEditingProfile(false);
-                setIsSettingsOpen(false);
-              } else {
-                setShowProfilePopup(!showProfilePopup);
-              }
-            }}
+          {/* Main Profile Control */}
+          <div 
+            onClick={() => setShowProfilePopup(!showProfilePopup)}
+            className="group flex items-center p-2 rounded-2xl bg-gray-800/10 hover:bg-gray-800/40 border border-transparent hover:border-white/5 cursor-pointer transition-all duration-300 active:scale-[0.97]"
           >
-            <img src={myProfile.avatar} alt="Me" className="w-10 h-10 rounded-full border border-gray-600 shadow-sm" />
-            <div className="flex-1">
-              <h4 className="font-bold text-gray-100 text-sm">{myProfile.name}</h4>
-              <div className="flex items-center gap-1.5 mt-0.5">
-                <span className="text-xs text-green-400 font-medium tracking-wide">● Active</span>
+            <div className="relative">
+              <div className="w-12 h-12 rounded-xl overflow-hidden shadow-2xl transition-transform duration-300 group-hover:scale-105">
+                <img src={myProfile.avatar} alt="Profile" className="w-full h-full object-cover" />
               </div>
+              <div className="absolute -bottom-1 -right-1 bg-green-500 border-2 border-[#111827] rounded-full w-4 h-4 shadow-lg ring-1 ring-white/10"></div>
             </div>
+            
+            <div className="ml-4 flex-1 min-w-0 pr-2">
+              <div className="flex items-center gap-1.5 mb-0.5">
+                <h3 className="font-bold text-sm text-white truncate transition-colors group-hover:text-indigo-300">{myProfile.name}</h3>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" className={`text-gray-500 transition-transform duration-300 ${showProfilePopup ? 'rotate-180' : ''}`}>
+                  <polyline points="6 9 12 15 18 9"></polyline>
+                </svg>
+              </div>
+              <p className="text-[11px] font-medium text-gray-400 truncate uppercase tracking-widest opacity-80 group-hover:opacity-100">{myProfile.email}</p>
+            </div>
+            
+            <button className="p-2 opacity-0 group-hover:opacity-100 text-gray-500 hover:text-white transition-opacity">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+            </button>
           </div>
-          <button
-            onClick={() => setIsSettingsOpen(true)}
-            className="text-gray-400 hover:text-white p-2 rounded-full hover:bg-gray-800 transition-colors flex-shrink-0"
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="3"></circle>
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-            </svg>
-          </button>
         </div>
 
       </div>
@@ -658,27 +786,161 @@ const ChatFlow = () => {
                       <div className={`px-5 py-3.5 rounded-[22px] shadow-lg transform transition-transform hover:scale-[1.01] ${msg.sender === 'me'
                         ? 'bg-gradient-to-br from-rose-500 via-fuchsia-500 to-purple-600 text-white rounded-br-sm shadow-fuchsia-500/25 border-t border-fuchsia-400/30'
                         : 'bg-[#1e2738]/90 backdrop-blur-md text-gray-100 border border-gray-700/60 rounded-bl-sm shadow-black/20 hover:bg-[#252f44]'
-                        }`}>
-                        <p className="text-[15px] leading-relaxed break-words tracking-wide">{msg.text}</p>
+                        } ${msg.text && /^(\p{Extended_Pictographic}|\p{Emoji_Modifier}|\u200D|\uFE0F|\s)+$/u.test(msg.text) && !msg.imageUrl && !msg.imageUrls && !msg.documents && !msg.documentName ? '!bg-none !bg-transparent !shadow-none !border-none !p-0 group-hover:!scale-100' : ''}`}>
+                        {msg.imageUrl && (
+                          <img 
+                            src={msg.imageUrl} 
+                            alt="attachment" 
+                            onClick={() => setViewingImage(msg.imageUrl)}
+                            className="max-w-[200px] sm:max-w-xs rounded-xl mb-1 object-cover border-2 border-white/20 shadow-md ignore-theme cursor-pointer hover:opacity-90 transition-opacity" 
+                          />
+                        )}
+                        {msg.imageUrls && (
+                          <div className={`grid gap-1.5 mb-1 ${msg.imageUrls.length > 1 ? 'grid-cols-2' : 'grid-cols-1'} max-w-[280px] sm:max-w-sm`}>
+                            {msg.imageUrls.map((url, i) => (
+                              <img 
+                                key={i} 
+                                src={url} 
+                                alt="attachment" 
+                                onClick={() => setViewingImage(url)}
+                                className={`rounded-xl object-cover border-2 border-white/20 shadow-md ignore-theme cursor-pointer hover:opacity-90 transition-opacity ${msg.imageUrls.length === 1 ? 'max-w-[200px] sm:max-w-xs' : 'w-full aspect-square'}`} 
+                              />
+                            ))}
+                          </div>
+                        )}
+                        {msg.documentName && (
+                          <div className="flex items-center gap-3 bg-black/20 p-3 rounded-xl border border-white/10 mb-1 max-w-[260px] sm:max-w-[300px]">
+                            <div className="w-10 h-10 shrink-0 bg-indigo-500/20 text-indigo-100 flex items-center justify-center rounded-lg shadow-inner">
+                              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                            </div>
+                            <div className="overflow-hidden">
+                              <p className="text-[13px] font-bold text-white truncate drop-shadow-md">{msg.documentName}</p>
+                              <a href={msg.documentUrl} download={msg.documentName} className="text-[10px] font-black uppercase tracking-widest text-[#a5b4fc] hover:text-white mt-1 inline-block transition-colors">Download</a>
+                            </div>
+                          </div>
+                        )}
+                        {msg.documents && (
+                           <div className="flex flex-col gap-1.5 mb-1">
+                             {msg.documents.map((doc, i) => (
+                                <div 
+                                  key={i} 
+                                  onClick={() => setViewingDocument({ url: doc.documentUrl, name: doc.documentName })}
+                                  className="group flex items-center gap-3 bg-black/20 hover:bg-black/30 p-3 rounded-xl border border-white/10 max-w-[260px] sm:max-w-[300px] cursor-pointer transition-all shadow-sm hover:shadow-md"
+                                >
+                                   <div className="w-10 h-10 shrink-0 bg-indigo-500/20 group-hover:bg-indigo-500/30 text-indigo-100 flex items-center justify-center rounded-lg shadow-inner transition-colors">
+                                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                                   </div>
+                                   <div className="overflow-hidden">
+                                     <p className="text-[13px] font-bold text-white truncate drop-shadow-md">{doc.documentName}</p>
+                                     <span className="text-[10px] font-black uppercase tracking-widest text-indigo-300 mt-1 inline-block drop-shadow-sm group-hover:text-indigo-200 transition-colors">Click to view</span>
+                                   </div>
+                                </div>
+                             ))}
+                           </div>
+                        )}
+                        {msg.text && (
+                          <p className={`leading-relaxed break-words tracking-wide ${/^(\p{Extended_Pictographic}|\p{Emoji_Modifier}|\u200D|\uFE0F|\s)+$/u.test(msg.text) && !msg.imageUrl && !msg.imageUrls && !msg.documents && !msg.documentName ? 'text-[50px] leading-tight drop-shadow-sm ignore-theme' : 'text-[15px]'}`}>
+                            {msg.text}
+                          </p>
+                        )}
                       </div>
                       <span className="text-xs font-medium text-gray-500 mt-1.5 px-1">{msg.time}</span>
                     </div>
                   </div>
                 </div>
               ))}
+              <div ref={messagesEndRef} />
             </div>
 
             {/* Input Area */}
             <div className="p-6 bg-gradient-to-t from-[#090d16] via-[#0B0F19]/90 to-transparent flex flex-col justify-end z-20">
               <div className="w-full max-w-4xl mx-auto bg-[#171f2d]/80 backdrop-blur-2xl border border-gray-700/60 rounded-3xl flex items-center px-3 py-3 shadow-2xl focus-within:ring-2 ring-fuchsia-500/40 focus-within:bg-[#1a2333]/90 transition-all duration-300">
-                <button className="text-gray-400 hover:text-fuchsia-400 transition-colors p-2.5 rounded-2xl hover:bg-gray-800/60">
-                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg>
-                </button>
-                <input type="text" placeholder="Type a message..." className="bg-transparent outline-none flex-1 px-4 text-gray-100 placeholder-gray-500 font-medium text-[15px] h-full" />
-                <button className="text-gray-400 hover:text-amber-400 transition-colors p-2.5 mr-2 rounded-2xl hover:bg-gray-800/60">
-                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M8 14s1.5 2 4 2 4-2 4-2"></path><line x1="9" y1="9" x2="9.01" y2="9"></line><line x1="15" y1="9" x2="15.01" y2="9"></line></svg>
-                </button>
-                <button className="w-11 h-11 bg-gradient-to-br from-fuchsia-500 via-rose-500 to-amber-500 rounded-2xl flex items-center justify-center text-white hover:from-fuchsia-400 hover:to-amber-400 shadow-lg shadow-rose-500/30 transition-all transform hover:scale-105 active:scale-95 border-t border-fuchsia-400/30">
+                {/* Responsive Gallery / Attachment Button */}
+                <div className="relative">
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); setShowAttachmentMenu(!showAttachmentMenu); }}
+                    className={`transition-colors p-2.5 rounded-2xl hover:bg-gray-800/60 flex items-center justify-center ${showAttachmentMenu ? 'text-fuchsia-400 bg-gray-800/60' : 'text-gray-400 hover:text-fuchsia-400'}`}
+                  >
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg>
+                  </button>
+                  
+                  {showAttachmentMenu && (
+                    <div 
+                      onClick={(e) => e.stopPropagation()}
+                      className="absolute bottom-full left-0 mb-4 w-56 bg-[#1F2937] border border-gray-700 rounded-2xl shadow-2xl p-2 z-50 animate-fade-in-up origin-bottom-left"
+                    >
+                      <button 
+                        onClick={() => { fileInputRef.current?.click(); setShowAttachmentMenu(false); }}
+                        className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-medium text-gray-200 hover:bg-gray-800 hover:text-white rounded-xl transition-all"
+                      >
+                        <div className="w-8 h-8 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center">
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                        </div>
+                        Document
+                      </button>
+                      <button 
+                        onClick={() => { imageInputRef.current?.click(); setShowAttachmentMenu(false); }}
+                        className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-medium text-gray-200 hover:bg-gray-800 hover:text-white rounded-xl transition-all mt-1"
+                      >
+                        <div className="w-8 h-8 rounded-full bg-rose-500/20 text-rose-400 flex items-center justify-center">
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                        </div>
+                        Photos & Videos
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Hidden File Inputs */}
+                <input 
+                  type="file" 
+                  ref={fileInputRef} 
+                  className="hidden" 
+                  multiple
+                  onChange={(e) => handleAttachmentSubmit(e, 'document')} 
+                />
+                <input 
+                  type="file" 
+                  accept="image/*,video/*" 
+                  ref={imageInputRef} 
+                  className="hidden" 
+                  multiple
+                  onChange={(e) => handleAttachmentSubmit(e, 'image')} 
+                />
+                <input 
+                  type="text" 
+                  placeholder="Type a message..." 
+                  className="bg-transparent outline-none flex-1 px-4 text-gray-100 placeholder-gray-500 font-medium text-[15px] h-full" 
+                  value={messageInput}
+                  onChange={(e) => setMessageInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleSendMessage();
+                  }}
+                />
+                <div className="relative">
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); setShowEmojiPicker(!showEmojiPicker); }}
+                    className={`transition-colors p-2.5 mr-2 rounded-2xl flex items-center justify-center ${showEmojiPicker ? 'text-amber-400 bg-gray-800/60' : 'text-gray-400 hover:text-amber-400 hover:bg-gray-800/60'}`}
+                  >
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M8 14s1.5 2 4 2 4-2 4-2"></path><line x1="9" y1="9" x2="9.01" y2="9"></line><line x1="15" y1="9" x2="15.01" y2="9"></line></svg>
+                  </button>
+                  
+                  {showEmojiPicker && (
+                    <div 
+                      onClick={(e) => e.stopPropagation()}
+                      className="absolute bottom-full right-0 mb-4 z-50 animate-fade-in-up origin-bottom-right shadow-2xl"
+                    >
+                      <EmojiPicker 
+                        theme={settings.darkMode ? 'dark' : 'light'} 
+                        onEmojiClick={(emojiData) => setMessageInput(prev => prev + emojiData.emoji)} 
+                      />
+                    </div>
+                  )}
+                </div>
+                <button 
+                  onClick={handleSendMessage}
+                  className="w-11 h-11 bg-gradient-to-br from-fuchsia-500 via-rose-500 to-amber-500 rounded-2xl flex items-center justify-center text-white hover:from-fuchsia-400 hover:to-amber-400 shadow-lg shadow-rose-500/30 transition-all transform hover:scale-105 active:scale-95 border-t border-fuchsia-400/30"
+                >
                   <SendIcon />
                 </button>
               </div>

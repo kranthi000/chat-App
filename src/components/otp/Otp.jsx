@@ -1959,6 +1959,9 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import toast, { Toaster } from "react-hot-toast";
+import { useDispatch } from "react-redux";
+import { verifyOtpService } from "../../services/service";
+import { setActiveUser } from "../../chatSlice";
 
 /* ─────────────────────────────────────────────────────────────
    ENVELOPE CHARACTER
@@ -2042,6 +2045,7 @@ function OtpBox({ value, inputRef, onChange, onKeyDown, onPaste, isFilled, isAct
    MAIN OTP COMPONENT
 ───────────────────────────────────────────────────────────── */
 export default function OtpVerify() {
+  const dispatch = useDispatch();
   const [otp, setOtp]                 = useState(["", "", "", "", "", ""]);
   const [opened, setOpened]           = useState(false);
   const [loading, setLoading]         = useState(false);
@@ -2099,10 +2103,17 @@ export default function OtpVerify() {
     if (code.length < 6) { toast.error("Please enter all 6 digits"); triggerShake(); return; }
     setLoading(true);
     try {
-      await new Promise((r) => setTimeout(r, 1200)); // ← replace with: await verifyOtpService({ otp: code })
+      const response = await verifyOtpService({ email, otp: code });
+      
+      if (response.token) {
+        localStorage.setItem("chat_token", response.token);
+      }
+      
+      dispatch(setActiveUser(response.user || response));
+      
       setPhase("success");
       toast.success("Email verified! 🎉");
-      setTimeout(() => navigate("/"), 2000);
+      setTimeout(() => navigate("/chat"), 2000);
     } catch {
       toast.error("Invalid OTP. Try again.");
       triggerShake();
