@@ -1,1 +1,10 @@
 @import "tailwindcss";
+
+.light-theme-active {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+.light-theme-active img, 
+.light-theme-active video {
+  filter: invert(1) hue-rotate(180deg);
+}

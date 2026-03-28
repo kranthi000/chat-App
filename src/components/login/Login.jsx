@@ -3,6 +3,8 @@ import { Link } from "react-router-dom";
 import { useDispatch } from "react-redux";
 import toast, { Toaster } from "react-hot-toast";
 import { useNavigate } from "react-router-dom";
+import { loginService } from "../../services/service";
+import { setActiveUser } from "../../chatSlice";
 
 /* ─────────────────────────────────────────────────────────────
    SVG ICONS
@@ -179,12 +181,18 @@ export default function Login() {
     }
     setLoading(true);
     try {
-      // Replace with your loginService call, e.g.:
-      // const response = await loginService({ email, password });
-      // dispatch(addUser(response));
+      const response = await loginService({ email, password });
+      
+      // Store token if returned
+      if (response.token) {
+        localStorage.setItem("chat_token", response.token);
+      }
+      
+      dispatch(setActiveUser(response.user || response));
+      
       toast.success("Welcome back! 🎉", toastCfg);
       setFormData({ email: "", password: "" });
-       setTimeout(() => navigate("/Chat"), 2000);
+      setTimeout(() => navigate("/chat"), 2000);
 
     } catch (err) {
       console.error(err);
