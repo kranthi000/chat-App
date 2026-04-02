@@ -1109,20 +1109,27 @@ export default function Register() {
       return;
     }
 
+    // Validation: Match backend 6-char requirement
+    if (password.length < 6) {
+      toast.error("Password must be at least 6 characters long");
+      return;
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+
     setLoading(true);
     let success = false;
 
     try {
       const data = new FormData();
       data.append("name", name);
-      data.append("email", email);
+      data.append("email", normalizedEmail);
       data.append("password", password);
       if (imageFile) data.append("profileImage", imageFile);
 
       const response = await registerService(data);
-      dispatch(addUser(response ?? { name, email, image: previewUrl }));
+      dispatch(addUser(response ?? { name, email: normalizedEmail, image: previewUrl }));
 
-      // Mark success only AFTER the API resolves without throwing
       success = true;
 
     } catch (err) {
@@ -1133,10 +1140,9 @@ export default function Register() {
       setLoading(false);
     }
 
-    // Navigate ONLY when registration succeeded — never on error
     if (success) {
       setLaunching(true);
-      setTimeout(() => navigate("/verify-otp", { state: { email, name } }), 700);
+      setTimeout(() => navigate("/verify-otp", { state: { email: normalizedEmail, name } }), 700);
     }
   }
 

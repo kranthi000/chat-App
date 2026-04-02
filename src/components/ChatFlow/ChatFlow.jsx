@@ -1,1048 +1,181 @@
-import React, { useState, useEffect, useRef } from "react";
-import EmojiPicker from 'emoji-picker-react';
-import { getMeService, getAllUsersService } from "../../services/service";
+import React, { useState, useRef, useEffect } from "react";
+import { resolveMediaURL } from "../../services/chatUtils";
+import { useChatCore } from "../../hooks/useChatCore";
 
-const SearchIcon = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-  </svg>
-);
+// Sub-components
+import ChatSidebar from "./ChatSidebar";
+import ChatWindow from "./ChatWindow";
+import ContactPanel from "./ContactPanel";
+import AddUserModal from "./AddUserModal";
+import SettingsModal from "./SettingsModal";
+import ProfileModal from "./ProfileModal";
+import MediaLightbox from "./MediaLightbox";
+import UploadProgress from "./UploadProgress";
 
-const SendIcon = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-  </svg>
-);
-
+/**
+ * Main Chat Application Entry Point.
+ * Organized using a clean component-based architecture:
+ * - useChatCore manages sockets & state.
+ * - chatUtils handles media transformations.
+ * - Sub-components handle specific UI sections.
+ */
 const ChatFlow = () => {
+  // --- UI Orchestration State ---
   const [activeChat, setActiveChat] = useState(1);
   const [activeTab, setActiveTab] = useState("chats");
   const [activeGroup, setActiveGroup] = useState(101);
   const [search, setSearch] = useState("");
   const [showProfilePopup, setShowProfilePopup] = useState(false);
-  const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
+  const [addUserEmail, setAddUserEmail] = useState("");
+  const [addUserStatus, setAddUserStatus] = useState(null);
   const [showContactInfo, setShowContactInfo] = useState(false);
-  const [viewingStatus, setViewingStatus] = useState(null);
-  const [previewStatus, setPreviewStatus] = useState(null);
-  const [previewCall, setPreviewCall] = useState(null);
   const [settings, setSettings] = useState({ notifications: true, darkMode: true });
-  const [myProfile, setMyProfile] = useState({
-    name: "Sai Krishna",
-    email: "loading...",
-    role: "Software Engineer",
-    avatar: "https://i.pravatar.cc/150?u=me",
-    status: "online"
-  });
-
-  const [contacts, setContacts] = useState([
-    { id: 1, name: "Alice Freeman", message: "That's a great idea! 🚀", time: "10:30 AM", unread: 2, online: true, avatar: "https://i.pravatar.cc/150?u=1" },
-    { id: 2, name: "Bob Smith", message: "See you at 5 then.", time: "09:15 AM", unread: 0, online: true, avatar: "https://i.pravatar.cc/150?u=2" },
-    { id: 3, name: "Charlie Davis", message: "Can you send the design files?", time: "Yesterday", unread: 0, online: false, avatar: "https://i.pravatar.cc/150?u=3" },
-    { id: 4, name: "Diana Prince", message: "Thanks for the heads up.", time: "Yesterday", unread: 0, online: false, avatar: "https://i.pravatar.cc/150?u=4" },
-    { id: 5, name: "Evan Wright", message: "I'll look into it right away.", time: "Monday", unread: 0, online: true, avatar: "https://i.pravatar.cc/150?u=5" },
-  ]);
-
   const [messageInput, setMessageInput] = useState("");
-  const messagesEndRef = useRef(null);
-  
   const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-  const [viewingImage, setViewingImage] = useState(null);
-  const [viewingDocument, setViewingDocument] = useState(null);
+  const [viewingMedia, setViewingMedia] = useState(null);
+  const [viewingStatus, setViewingStatus] = useState(null);
+  const [_previewStatus, setPreviewStatus] = useState(null);
+  const [_previewCall, setPreviewCall] = useState(null);
+
+  const [myProfile, setMyProfile] = useState({
+    id: null, name: "User", email: "loading...", avatar: "U", status: "online"
+  });
+
+  // --- Logic Layer (Socket, State, Persistence) ---
+  const {
+    socket,
+    contacts,
+    messagesData,
+    handleSendMessage,
+    handleAttachmentSubmit,
+    uploadProgress,
+  } = useChatCore(
+    myProfile, setMyProfile, activeChat, setActiveChat, 
+    setAddUserStatus, setIsAddUserModalOpen, setAddUserEmail
+  );
+
+  // --- UI Refs ---
+  const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
   const imageInputRef = useRef(null);
-
-  const [messagesData, setMessagesData] = useState({
-    1: [
-      { id: 1, text: "Hey! How's it going with the new landing page?", sender: "them", time: "10:20 AM" },
-      { id: 2, text: "Good! Just reviewing the new premium dark mode designs. 🎨", sender: "me", time: "10:25 AM" },
-      { id: 3, text: "That's a great idea! 🚀 I think the users will love it.", sender: "them", time: "10:30 AM" },
-    ],
-    2: [
-      { id: 1, text: "Are we still on for the meeting later?", sender: "them", time: "09:00 AM" },
-      { id: 2, text: "Yes, definitely. See you at 5 then.", sender: "me", time: "09:15 AM" }
-    ],
-    3: [
-      { id: 1, text: "Can you send the design files?", sender: "them", time: "Yesterday" }
-    ],
-    4: [
-      { id: 1, text: "Thanks for the heads up.", sender: "them", time: "Yesterday" }
-    ],
-    5: [
-      { id: 1, text: "I'll look into it right away.", sender: "them", time: "Monday" }
-    ]
-  });
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messagesData, activeChat]);
 
-  // Fetch profiles and contacts from MongoDB
-  useEffect(() => {
-    const fetchData = async () => {
-      const token = localStorage.getItem("chat_token");
-      if (!token) return;
-
-      try {
-        // Fetch current user
-        const me = await getMeService(token);
-        if (me) {
-          setMyProfile({
-            name: me.name || "User",
-            email: me.email || "No email",
-            role: me.role || "Member",
-            avatar: me.profileImage || me.avatar || "https://i.pravatar.cc/150?u=me",
-            status: "online"
-          });
-        }
-
-        // Fetch all users
-        const allUsers = await getAllUsersService(token);
-        if (allUsers && Array.isArray(allUsers)) {
-          const formattedContacts = allUsers.map((u, index) => ({
-            id: u._id || index + 1,
-            name: u.name,
-            message: u.lastMessage || "Hey there!",
-            time: u.lastTime || "Just now",
-            unread: 0,
-            online: u.status === "online",
-            avatar: u.profileImage || u.avatar || `https://i.pravatar.cc/150?u=${index + 1}`
-          }));
-          setContacts(formattedContacts);
-        }
-      } catch (err) {
-        console.error("Error fetching chat data:", err);
-      }
-    };
-
-    fetchData();
-  }, []);
-
-  const groupsMock = [
-    { id: 101, name: "10th Class", message: "Teacher: Don't forget the assignment.", time: "11:00 AM", unread: 5, avatar: "https://ui-avatars.com/api/?name=10th+Class&background=6366f1&color=fff" },
-    { id: 102, name: "9th Class", message: "Student: When is the exam?", time: "Yesterday", unread: 0, avatar: "https://ui-avatars.com/api/?name=9th+Class&background=ec4899&color=fff" }
-  ];
-
-  const subGroupsData = {
-    101: [
-      { id: 1011, name: "Alice (Class Rep)", role: "Student", avatar: "https://i.pravatar.cc/150?u=12" },
-      { id: 1012, name: "Bob", role: "Student", avatar: "https://i.pravatar.cc/150?u=13" },
-      { id: 1013, name: "Charlie", role: "Student", avatar: "https://i.pravatar.cc/150?u=14" },
-    ],
-    102: [
-      { id: 1021, name: "Dave", role: "Student", avatar: "https://i.pravatar.cc/150?u=15" },
-      { id: 1022, name: "Eve Bright", role: "Student", avatar: "https://i.pravatar.cc/150?u=16" },
-    ]
-  };
-
-  const callsMock = [
-    { id: 201, name: "Alice Freeman", type: "Missed Audio Call", time: "Yesterday, 8:30 PM", avatar: "https://i.pravatar.cc/150?u=1", missed: true },
-    { id: 202, name: "Bob Smith", type: "Outgoing Video Call", time: "Monday, 2:15 PM", avatar: "https://i.pravatar.cc/150?u=2", missed: false }
-  ];
-
+  // --- Context-Specific Mocks ---
+  const groupsMock = [];
   const statusMock = [
-    { id: 301, name: "My Status", time: "Tap to add status update", avatar: myProfile.avatar, isMe: true },
+    { id: 301, name: "My Status", time: "Tap to add updates", avatar: myProfile.avatar, isMe: true },
     { id: 302, name: "Diana Prince", time: "Today, 10:20 AM", avatar: "https://i.pravatar.cc/150?u=4", isMe: false }
   ];
-
+  const callsMock = [
+    { id: 201, name: "Alice Freeman", type: "Missed Audio Call", time: "Yesterday, 8:30 PM", avatar: "https://i.pravatar.cc/150?u=1", missed: true },
+  ];
   const groupChatsMock = [
     { id: 401, name: "Family Group", message: "Mom: Dinner is ready!", time: "12:00 PM", unread: 2, avatar: "https://ui-avatars.com/api/?name=Family+Group&background=10B981&color=fff", isGroup: true },
-    { id: 402, name: "Weekend Plans", message: "You: Sounds good.", time: "Yesterday", unread: 0, avatar: "https://ui-avatars.com/api/?name=Weekend+Plans&background=F59E0B&color=fff", isGroup: true }
   ];
 
-  let currentContact = contacts.find(c => c.id === activeChat);
-  if (!currentContact) {
-    for (const groupId in subGroupsData) {
-      const found = subGroupsData[groupId]?.find(s => s.id === activeChat);
-      if (found) {
-        currentContact = { id: found.id, name: found.name, avatar: found.avatar, online: true };
-        break;
-      }
-    }
-  }
-  if (!currentContact) {
-    const foundGroupChat = groupChatsMock.find(g => g.id === activeChat);
-    if (foundGroupChat) currentContact = { id: foundGroupChat.id, name: foundGroupChat.name, avatar: foundGroupChat.avatar, online: true, isGroup: true };
-  }
+  // --- Derived Data ---
+  const filteredContacts = contacts.filter(c => c.name.toLowerCase().includes(search.toLowerCase()));
+  let currentContact = contacts.find(c => String(c.id) === String(activeChat)) || groupChatsMock.find(g => g.id === activeChat);
+  const currentMessages = messagesData[activeChat] || [];
 
-
-  const handleSendMessage = () => {
-    if (!messageInput.trim()) return;
-    
-    const now = new Date();
-    let hours = now.getHours();
-    const ampm = hours >= 12 ? 'PM' : 'AM';
-    hours = hours % 12;
-    hours = hours ? hours : 12; 
-    let minutes = now.getMinutes().toString().padStart(2, '0');
-    const timeString = `${hours}:${minutes} ${ampm}`;
-    
-    const newMessage = {
-      id: Date.now(),
-      text: messageInput.trim(),
-      sender: "me",
-      time: timeString
-    };
-
-    setMessagesData(prev => ({
-      ...prev,
-      [activeChat]: [...(prev[activeChat] || []), newMessage]
-    }));
-    
-    setMessageInput("");
-  };
-
-  const handleAttachmentSubmit = (e, type) => {
-    const files = Array.from(e.target.files);
-    if (!files.length) return;
-
-    const now = new Date();
-    let hours = now.getHours();
-    const ampm = hours >= 12 ? 'PM' : 'AM';
-    hours = hours % 12;
-    hours = hours ? hours : 12; 
-    let minutes = now.getMinutes().toString().padStart(2, '0');
-    const timeString = `${hours}:${minutes} ${ampm}`;
-
-    let imageUrls = [];
-    let documents = [];
-
-    files.forEach(file => {
-      if (type === 'image') {
-        imageUrls.push(URL.createObjectURL(file));
-      } else {
-        documents.push({
-          documentUrl: URL.createObjectURL(file),
-          documentName: file.name
-        });
-      }
+  const handleAddByEmail = () => {
+    if (!addUserEmail.trim() || !socket) return;
+    setAddUserStatus({ type: 'info', msg: 'Connecting...' });
+    socket.emit("send-message-by-email", {
+      fromUserId: myProfile.id,
+      toEmail: addUserEmail.trim(),
+      message: "Hey! Let's chat.",
+      type: "text"
     });
-
-    const newMessage = {
-      id: Date.now(),
-      text: "",
-      imageUrls: imageUrls.length > 0 ? imageUrls : null,
-      documents: documents.length > 0 ? documents : null,
-      sender: "me",
-      time: timeString
-    };
-
-    setMessagesData(prev => ({
-      ...prev,
-      [activeChat]: [...(prev[activeChat] || []), newMessage]
-    }));
-    
-    // Reset inputs
-    if (fileInputRef.current) fileInputRef.current.value = "";
-    if (imageInputRef.current) imageInputRef.current.value = "";
   };
-
-  const currentMessages = messagesData[activeChat] || [
-    { id: 99, text: "Hey! What's up?", sender: "them", time: "Just now" }
-  ];
-
-  const filteredContacts = contacts.filter(contact =>
-    contact.name.toLowerCase().includes(search.toLowerCase())
-  );
 
   return (
-    <div
-      className={`flex h-screen font-sans bg-gray-900 text-gray-100 overflow-hidden relative ${!settings.darkMode ? 'light-theme-active' : ''}`}
-      style={{ backgroundImage: 'radial-gradient(circle at 50% 0%, #1f2937, #0B0F19 70%)' }}
-      onClick={() => {
-        if (showProfilePopup) setShowProfilePopup(false);
-        if (isEditingProfile) setIsEditingProfile(false);
-        if (isSettingsOpen) setIsSettingsOpen(false);
-        if (showAttachmentMenu) setShowAttachmentMenu(false);
-        if (showEmojiPicker) setShowEmojiPicker(false);
-      }}
-    >
+    <div className={`flex h-screen font-sans bg-gray-900 text-gray-100 overflow-hidden relative ${!settings.darkMode ? 'light-theme-active' : ''}`}
+         style={{ backgroundImage: 'radial-gradient(circle at 50% 0%, #1f2937, #0B0F19 70%)' }}>
 
-      {/* Fullscreen Image Viewer Modal */}
-      {viewingImage && (
-        <div 
-          className="fixed inset-0 z-[300] bg-black/95 backdrop-blur-md flex items-center justify-center animate-fade-in p-4 sm:p-8" 
-          onClick={() => setViewingImage(null)}
-        >
-          <button 
-            className="absolute top-6 right-6 text-white/70 hover:text-white p-2.5 rounded-full bg-white/10 hover:bg-white/20 transition-all z-[310]"
-            onClick={() => setViewingImage(null)}
-          >
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-          </button>
-          <img 
-            src={viewingImage} 
-            alt="Fullscreen Attachment" 
-            className="max-w-full max-h-full object-contain rounded-xl shadow-[0_0_50px_rgba(0,0,0,0.5)] transform scale-100 animate-zoom-in ignore-theme" 
-            onClick={(e) => e.stopPropagation()} 
-          />
-        </div>
+      {/* Global Overlays */}
+      <MediaLightbox media={viewingMedia} onClose={() => setViewingMedia(null)} />
+      <UploadProgress uploadProgress={uploadProgress} />
+
+      {/* Modals */}
+      <AddUserModal 
+        isOpen={isAddUserModalOpen} onClose={() => setIsAddUserModalOpen(false)}
+        email={addUserEmail} setEmail={setAddUserEmail}
+        status={addUserStatus} setStatus={setAddUserStatus}
+        onAdd={handleAddByEmail}
+      />
+      
+      <SettingsModal 
+        isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)}
+        settings={settings} setSettings={setSettings}
+      />
+      <ProfileModal 
+        isOpen={isProfileModalOpen} onClose={() => setIsProfileModalOpen(false)}
+        user={myProfile}
+        setMyProfile={setMyProfile}
+        socket={socket}
+      />
+      
+      {/* Main Layout Sections */}
+      <ChatSidebar 
+        activeTab={activeTab} setActiveTab={setActiveTab}
+        activeChat={activeChat} setActiveChat={setActiveChat}
+        search={search} setSearch={setSearch}
+        settings={settings} setSettings={setSettings}
+        myProfile={myProfile} filteredContacts={filteredContacts}
+        groupsMock={groupsMock} groupChatsMock={groupChatsMock}
+        callsMock={callsMock} statusMock={statusMock}
+        setIsAddUserModalOpen={setIsAddUserModalOpen}
+        setShowContactInfo={setShowContactInfo}
+        showProfilePopup={showProfilePopup} setShowProfilePopup={setShowProfilePopup}
+        setIsSettingsOpen={setIsSettingsOpen}
+        setIsProfileModalOpen={setIsProfileModalOpen}
+        setPreviewCall={setPreviewCall} setPreviewStatus={setPreviewStatus}
+      />
+
+      {activeTab === 'groups' && (
+         <div className="w-[280px] bg-[#0E1321] border-r border-gray-800 hidden lg:flex flex-col z-10 shadow-xl">
+            <div className="h-[88px] border-b border-gray-800 px-6 flex items-center bg-[#0E1321] sticky top-0 z-10">
+               <h2 className="text-base font-bold text-white uppercase tracking-wider">Group Context</h2>
+            </div>
+            <div className="flex-1 p-6 text-gray-500 text-sm italic">Select a group to see context...</div>
+         </div>
       )}
 
-      {/* Fullscreen Document Viewer Modal */}
-      {viewingDocument && (
-        <div 
-          className="fixed inset-0 z-[300] bg-black/95 backdrop-blur-md flex items-center justify-center animate-fade-in p-4 sm:p-8" 
-          onClick={() => setViewingDocument(null)}
-        >
-          <button 
-            className="absolute top-6 right-6 text-white/70 hover:text-white p-2.5 rounded-full bg-white/10 hover:bg-white/20 transition-all z-[310]"
-            onClick={() => setViewingDocument(null)}
-          >
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-          </button>
-          
-          <div className="w-full h-full max-w-6xl max-h-[90vh] bg-[#f8f9fa] rounded-2xl shadow-[0_0_50px_rgba(0,0,0,0.5)] flex flex-col overflow-hidden animate-zoom-in ignore-theme" onClick={(e) => e.stopPropagation()}>
-             <div className="bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center text-gray-800 shadow-sm z-10">
-               <div className="flex items-center gap-3 overflow-hidden">
-                 <div className="w-10 h-10 shrink-0 bg-indigo-100 text-indigo-500 flex items-center justify-center rounded-xl">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-                 </div>
-                 <span className="font-semibold text-lg truncate pr-4 text-gray-900 tracking-tight">{viewingDocument.name}</span>
-               </div>
-               <a href={viewingDocument.url} download={viewingDocument.name} className="flex shrink-0 items-center gap-2 text-sm font-bold text-white px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 rounded-xl transition-all shadow-md hover:shadow-lg active:scale-95">
-                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-                 Download
-               </a>
-             </div>
-             <iframe src={viewingDocument.url} className="w-full flex-1 border-0 bg-gray-50/50" title="Document Viewer" />
-          </div>
-        </div>
-      )}
+      <ChatWindow 
+        currentContact={currentContact} currentMessages={currentMessages}
+        messageInput={messageInput} setMessageInput={setMessageInput}
+        handleSendMessage={(params) => handleSendMessage(messageInput, setMessageInput, params)}
+        showEmojiPicker={showEmojiPicker} setShowEmojiPicker={setShowEmojiPicker}
+        showAttachmentMenu={showAttachmentMenu} setShowAttachmentMenu={setShowAttachmentMenu}
+        handleAttachmentSubmit={(e, type) => handleAttachmentSubmit(e, type, setMessageInput)}
+        fileInputRef={fileInputRef} imageInputRef={imageInputRef}
+        messagesEndRef={messagesEndRef}
+        setViewingMedia={setViewingMedia}
+        setShowContactInfo={setShowContactInfo} showContactInfo={showContactInfo}
+        settings={settings} getProfilePic={resolveMediaURL}
+      />
 
-      {/* Status Viewer Modal */}
+      <ContactPanel 
+        showContactInfo={showContactInfo} setShowContactInfo={setShowContactInfo}
+        currentContact={currentContact} myProfile={myProfile}
+      />
+
+      {/* Immersive Status View */}
       {viewingStatus && (
-        <div className="absolute inset-0 z-[200] bg-black flex flex-col transition-opacity animate-fade-in">
-          <div className="absolute top-0 w-full p-6 flex items-center justify-between z-10 bg-gradient-to-b from-black/80 to-transparent">
-            <div className="flex items-center gap-3">
-              <img src={viewingStatus.avatar} alt="Status Avatar" className="w-12 h-12 rounded-full border-2 border-indigo-500 shadow-md" />
-              <div>
-                <h3 className="text-white font-bold tracking-wide">{viewingStatus.name}</h3>
-                <p className="text-gray-300 text-xs font-medium">{viewingStatus.time}</p>
-              </div>
-            </div>
-            <button onClick={() => setViewingStatus(null)} className="text-white p-3 hover:bg-white/20 rounded-full transition-colors">
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-            </button>
-          </div>
-
-          <div className="flex-1 flex items-center justify-center bg-gray-900 border-y-8 border-gray-800">
-            <div className="text-center text-white px-8">
-              <span className="text-6xl mb-6 block animate-bounce">📸</span>
-              <h2 className="text-3xl font-bold mb-3 tracking-wide">{viewingStatus.name}'s Status Update</h2>
-              <p className="text-gray-400 font-medium">This is a mock immersive status view.</p>
-            </div>
-          </div>
-
-          <div className="h-20 bg-black flex items-center justify-center text-gray-500 text-sm">
-            <svg className="w-5 h-5 mr-2 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
-            Viewed by 5 others
-          </div>
+        <div className="fixed inset-0 z-[500] bg-black/95 flex flex-col items-center justify-center animate-fade-in" onClick={() => setViewingStatus(null)}>
+           <h2 className="text-white text-3xl font-bold tracking-tight">{viewingStatus.name}'s Status</h2>
+           <p className="text-gray-400 mt-2 uppercase tracking-widest text-[10px] font-black">Immersion View Active</p>
+           <button onClick={() => setViewingStatus(null)} className="mt-12 px-8 py-3 bg-white/10 hover:bg-white/20 text-white rounded-2xl transition-all border border-white/10 backdrop-blur-md">Close Immersion</button>
         </div>
       )}
-
-      {/* Sidebar */}
-      <div className="w-[320px] md:w-[380px] bg-[#0f1423]/90 backdrop-blur-2xl flex flex-col border-r border-gray-800/60 shadow-2xl z-20">
-
-        {/* Top Header */}
-        <div className="px-6 py-5 flex justify-between items-center z-20 sticky top-0 bg-[#0f1423]/80 backdrop-blur-xl border-b border-gray-800/50">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 via-rose-500 to-fuchsia-600 flex items-center justify-center shadow-lg shadow-rose-500/30 transform transition-transform hover:scale-105 cursor-pointer relative overflow-hidden group">
-              <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-500 mix-blend-overlay"></div>
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="relative z-10"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
-            </div>
-            <h1 className="text-2xl font-black tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-amber-200 via-rose-300 to-fuchsia-400 drop-shadow-sm">
-              ChatFlow
-            </h1>
-          </div>
-          <div className="flex items-center space-x-2 text-gray-400">
-            <button className="p-2 bg-gray-800/60 hover:bg-gray-700/80 hover:text-white rounded-full transition-all shadow-inner">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
-            </button>
-          </div>
-        </div>
-
-        {/* Search */}
-        <div className="px-6 py-4 relative z-10">
-          <div className="bg-[#1a2333]/80 rounded-2xl flex items-center px-4 py-3 shadow-inner border border-gray-700/50 focus-within:border-fuchsia-500/50 focus-within:ring-2 ring-fuchsia-500/20 transition-all duration-300">
-            <div className="text-gray-400 mr-3 group-focus-within:text-fuchsia-400 transition-colors">
-              <SearchIcon />
-            </div>
-            <input
-              type="text"
-              placeholder="Search conversations..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="bg-transparent outline-none flex-1 text-sm font-medium text-gray-100 placeholder-gray-500"
-            />
-          </div>
-        </div>
-
-        {/* Navigation Tabs */}
-        <div className="px-3 pb-4 flex gap-1">
-          {['chats', 'groups', 'group chats', 'calls', 'status'].map((tab) => (
-            <button
-              key={tab}
-              onClick={() => {
-                setActiveTab(tab);
-                setShowContactInfo(false);
-              }}
-              className={`flex-1 py-1.5 px-0.5 text-[10px] sm:text-[11px] font-bold rounded-lg uppercase tracking-tight transition-all ${activeTab === tab
-                ? 'bg-gradient-to-r from-rose-500/20 to-fuchsia-500/20 text-white shadow-sm border border-rose-500/30'
-                : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'
-                }`}
-            >
-              {tab === 'group chats' ? 'Group Chats' : tab}
-            </button>
-          ))}
-        </div>
-
-        {/* Active Tab Content */}
-        <div className="flex-1 overflow-y-auto mt-2 pb-6" style={{ scrollbarWidth: "none" }}>
-
-          {activeTab === 'chats' && (
-            filteredContacts.length > 0 ? (
-              filteredContacts.map((contact) => (
-                <div
-                  key={contact.id}
-                  onClick={() => {
-                    setActiveChat(contact.id);
-                    setShowContactInfo(true);
-                  }}
-                  className={`relative group h-[84px] flex items-center px-6 cursor-pointer transition-all duration-300 ${activeChat === contact.id
-                    ? 'bg-gradient-to-r from-fuchsia-500/10 to-transparent border-l-4 border-fuchsia-500'
-                    : 'hover:bg-gray-800/60 border-l-4 border-transparent'
-                    }`}
-                >
-                  <div className="relative">
-                    <img src={contact.avatar} alt={contact.name} className={`w-14 h-14 rounded-full object-cover shadow-lg transition-transform duration-300 group-hover:scale-105 ${activeChat === contact.id ? 'ring-2 ring-fuchsia-500 ring-offset-2 ring-offset-[#0f1423]' : 'border border-gray-700'}`} />
-                    {contact.online && (
-                      <div className="absolute bottom-0.5 right-0.5 bg-green-500 border-2 border-[#111827] rounded-full w-3.5 h-3.5 shadow-sm"></div>
-                    )}
-                  </div>
-                  <div className="ml-4 flex-1 overflow-hidden">
-                    <div className="flex justify-between items-center mb-1">
-                      <h3 className={`font-bold text-[15px] truncate ${activeChat === contact.id ? 'text-white' : 'text-gray-200 group-hover:text-white transition-colors'}`}>{contact.name}</h3>
-                      <span className={`text-xs font-medium ${contact.unread > 0 ? 'text-fuchsia-400' : 'text-gray-500'}`}>{contact.time}</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <p className={`text-sm truncate pr-2 ${activeChat === contact.id ? 'text-gray-300' : 'text-gray-400'}`}>{contact.message}</p>
-                      {contact.unread > 0 && (
-                        <span className="bg-gradient-to-r from-fuchsia-500 to-rose-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-lg shadow-fuchsia-500/30">
-                          {contact.unread}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ))
-            ) : (
-              <div className="text-center py-10">
-                <span className="text-gray-500 text-sm font-medium">No users found for "{search}"</span>
-              </div>
-            )
-          )}
-
-          {activeTab === 'groups' && (
-            groupsMock.map((group) => (
-              <div
-                key={group.id}
-                className={`relative group h-[84px] flex items-center px-6 cursor-pointer transition-all duration-300 ${activeGroup === group.id ? 'bg-gray-800 border-l-4 border-indigo-500' : 'hover:bg-gray-800 border-l-4 border-transparent'
-                  }`}
-                onClick={() => {
-                  setActiveGroup(group.id === activeGroup ? null : group.id);
-                  setShowContactInfo(false);
-                }}
-              >
-                <img src={group.avatar} alt={group.name} className="w-12 h-12 rounded-xl object-cover shadow-md border border-gray-700" />
-                <div className="ml-4 flex-1 overflow-hidden">
-                  <div className="flex justify-between items-center mb-1">
-                    <h3 className="font-semibold text-base text-gray-200 truncate">{group.name}</h3>
-                    <span className="text-xs font-medium text-gray-500">{group.time}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <p className="text-sm text-gray-400 truncate pr-2">{group.message}</p>
-                    {group.unread > 0 && (
-                      <span className="bg-indigo-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-lg shadow-indigo-500/30">
-                        {group.unread}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ))
-          )}
-
-          {activeTab === 'group chats' && (
-            groupChatsMock.map((chat) => (
-              <div
-                key={chat.id}
-                onClick={() => {
-                  setActiveChat(chat.id);
-                  setShowContactInfo(false);
-                }}
-                className={`relative group h-[84px] flex items-center px-6 cursor-pointer transition-all duration-300 ${activeChat === chat.id
-                  ? 'bg-gradient-to-r from-fuchsia-500/10 to-transparent border-l-4 border-fuchsia-500'
-                  : 'hover:bg-gray-800/60 border-l-4 border-transparent'
-                  }`}
-              >
-                <div className="relative">
-                  <img src={chat.avatar} alt={chat.name} className="w-12 h-12 rounded-full object-cover shadow-md border-2 border-gray-700 group-hover:border-indigo-400 transition-colors" />
-                </div>
-                <div className="ml-4 flex-1 overflow-hidden">
-                  <div className="flex justify-between items-center mb-1">
-                    <h3 className={`font-semibold text-base truncate ${activeChat === chat.id ? 'text-white' : 'text-gray-200'}`}>{chat.name}</h3>
-                    <span className={`text-xs font-medium ${chat.unread > 0 ? 'text-indigo-400' : 'text-gray-500'}`}>{chat.time}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <p className={`text-sm truncate pr-2 ${activeChat === chat.id ? 'text-gray-300' : 'text-gray-400'}`}>{chat.message}</p>
-                    {chat.unread > 0 && (
-                      <span className="bg-indigo-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-lg shadow-indigo-500/30">
-                        {chat.unread}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ))
-          )}
-
-          {activeTab === 'calls' && (
-            callsMock.map((call) => (
-              <div
-                key={call.id}
-                onClick={() => setPreviewCall(call)}
-                className={`relative group h-[84px] flex items-center px-6 cursor-pointer transition-all duration-300 ${previewCall?.id === call.id ? 'bg-gray-800 border-l-4 border-indigo-500' : 'hover:bg-gray-800 border-l-4 border-transparent'
-                  }`}
-              >
-                <div className="relative">
-                  <img src={call.avatar} alt={call.name} className="w-12 h-12 rounded-full object-cover shadow-md border-2 border-gray-700 group-hover:border-indigo-400 transition-colors" />
-                  {call.missed && <div className="absolute bottom-0 right-[-2px] bg-red-500 border-2 border-[#111827] rounded-full w-4 h-4 text-white flex items-center justify-center font-bold text-[10px]">!</div>}
-                </div>
-                <div className="ml-4 flex-1 overflow-hidden">
-                  <div className="flex justify-between items-center mb-1">
-                    <h3 className={`font-semibold text-base truncate ${previewCall?.id === call.id ? 'text-white' : call.missed ? 'text-red-400' : 'text-gray-200'}`}>{call.name}</h3>
-                    <span className="text-xs font-medium text-gray-500">{call.time}</span>
-                  </div>
-                  <div className="flex items-center mt-0.5">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={call.missed ? '#F87171' : '#10B981'} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="mr-1">
-                      {call.missed ? <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" /> : <path d="M7 17l9.2-9.2M17 17V7H7" />}
-                    </svg>
-                    <p className={`text-sm truncate pr-2 ${previewCall?.id === call.id ? 'text-gray-300' : 'text-gray-400'}`}>{call.type}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-1.5 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button className="p-2 hover:bg-gray-700 hover:text-green-400 rounded-full transition-colors" title="Audio Call">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.64 3.35 2 2 0 0 1 3.61 1h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L7.91 8.6a16 16 0 0 0 6 6l.96-.96a2 2 0 0 1 2.12-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>
-                  </button>
-                  <button className="p-2 hover:bg-gray-700 hover:text-indigo-400 rounded-full transition-colors" title="Video Call">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
-                  </button>
-                </div>
-              </div>
-            ))
-          )}
-
-          {activeTab === 'status' && (
-            statusMock.map((status) => (
-              <div
-                key={status.id}
-                onClick={() => setPreviewStatus(status)}
-                className={`relative group h-[84px] flex items-center px-6 cursor-pointer transition-all duration-300 ${previewStatus?.id === status.id ? 'bg-gray-800 border-l-4 border-indigo-500' : 'hover:bg-gray-800 border-l-4 border-transparent'
-                  }`}
-              >
-                <div className="relative">
-                  <img src={status.avatar} alt={status.name} className={`w-12 h-12 rounded-full object-cover shadow-md p-[2px] transition-colors ${previewStatus?.id === status.id ? 'border-2 border-indigo-400' : status.isMe ? 'border border-gray-600' : 'border-2 border-indigo-500'}`} />
-                  {status.isMe && (
-                    <div className="absolute bottom-0 right-[-2px] bg-indigo-500 border-2 border-[#111827] rounded-full w-4 h-4 flex items-center justify-center shadow-lg">
-                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-                    </div>
-                  )}
-                </div>
-                <div className="ml-4 flex-1 overflow-hidden">
-                  <h3 className={`font-semibold text-base truncate ${previewStatus?.id === status.id ? 'text-white' : 'text-gray-200'}`}>{status.name}</h3>
-                  <p className={`text-sm truncate mt-0.5 tracking-wide ${previewStatus?.id === status.id ? 'text-gray-300' : 'text-gray-400'}`}>{status.time}</p>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-
-        {/* Bottom Profile */}
-        {/* Bottom Profile - Modern Glassmorphism */}
-        <div className="px-5 py-4 mt-auto border-t border-gray-800/30 bg-[#0f1423]/40 backdrop-blur-md relative z-30">
-          
-          {/* Profile Menu Dropup */}
-          {showProfilePopup && (
-            <div 
-              className="absolute bottom-full left-5 right-5 mb-4 bg-[#1e293b]/95 backdrop-blur-2xl border border-white/10 rounded-2xl shadow-2xl p-2 z-[60] animate-in slide-in-from-bottom-5 duration-300"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex items-center gap-3 p-3 border-b border-white/5 mb-1">
-                <div className="relative">
-                  <img src={myProfile.avatar} alt="Me" className="w-10 h-10 rounded-full border border-indigo-500/50 shadow-sm" />
-                  <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-[#1e293b] rounded-full shadow-sm"></div>
-                </div>
-                <div className="overflow-hidden">
-                  <h3 className="text-sm font-bold text-white truncate">{myProfile.name}</h3>
-                  <p className="text-[10px] text-gray-400 truncate tracking-tight">{myProfile.email}</p>
-                </div>
-              </div>
-              
-              <div className="space-y-0.5">
-                <button 
-                  onClick={() => { setIsSettingsOpen(true); setShowProfilePopup(false); }}
-                  className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium text-gray-300 hover:bg-white/5 hover:text-white transition-all active:scale-[0.98]"
-                >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-                  Account Settings
-                </button>
-                <button className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium text-gray-300 hover:bg-white/5 hover:text-white transition-all active:scale-[0.98]">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
-                  Set Status
-                </button>
-                <div className="pt-1 mt-1 border-t border-white/5">
-                  <button 
-                    onClick={() => {
-                      localStorage.removeItem("chat_token");
-                      window.location.href = "/";
-                    }}
-                    className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-bold text-rose-400 hover:bg-rose-500/10 hover:text-rose-300 transition-all active:scale-[0.98]"
-                  >
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
-                    Log Out
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Main Profile Control */}
-          <div 
-            onClick={() => setShowProfilePopup(!showProfilePopup)}
-            className="group flex items-center p-2 rounded-2xl bg-gray-800/10 hover:bg-gray-800/40 border border-transparent hover:border-white/5 cursor-pointer transition-all duration-300 active:scale-[0.97]"
-          >
-            <div className="relative">
-              <div className="w-12 h-12 rounded-xl overflow-hidden shadow-2xl transition-transform duration-300 group-hover:scale-105">
-                <img src={myProfile.avatar} alt="Profile" className="w-full h-full object-cover" />
-              </div>
-              <div className="absolute -bottom-1 -right-1 bg-green-500 border-2 border-[#111827] rounded-full w-4 h-4 shadow-lg ring-1 ring-white/10"></div>
-            </div>
-            
-            <div className="ml-4 flex-1 min-w-0 pr-2">
-              <div className="flex items-center gap-1.5 mb-0.5">
-                <h3 className="font-bold text-sm text-white truncate transition-colors group-hover:text-indigo-300">{myProfile.name}</h3>
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" className={`text-gray-500 transition-transform duration-300 ${showProfilePopup ? 'rotate-180' : ''}`}>
-                  <polyline points="6 9 12 15 18 9"></polyline>
-                </svg>
-              </div>
-              <p className="text-[11px] font-medium text-gray-400 truncate uppercase tracking-widest opacity-80 group-hover:opacity-100">{myProfile.email}</p>
-            </div>
-            
-            <button className="p-2 opacity-0 group-hover:opacity-100 text-gray-500 hover:text-white transition-opacity">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
-            </button>
-          </div>
-        </div>
-
-      </div>
-
-      {/* Sub-groups Middle Sidebar */}
-      {activeTab === 'groups' && activeGroup && (
-        <div className="w-[280px] bg-[#0E1321] border-r border-gray-800 flex flex-col z-10 shadow-xl transition-all duration-300">
-          <div className="h-[88px] border-b border-gray-800 px-6 flex items-center bg-[#0E1321] sticky top-0 z-10">
-            <h2 className="text-base font-bold text-white tracking-wide">
-              {groupsMock.find(g => g.id === activeGroup)?.name} Students
-            </h2>
-          </div>
-          <div className="flex-1 overflow-y-auto px-4 py-4" style={{ scrollbarWidth: "none" }}>
-            {subGroupsData[activeGroup]?.map((sub) => (
-              <div
-                key={sub.id}
-                onClick={() => { setActiveChat(sub.id); setShowContactInfo(true); }}
-                className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all mb-1 border shadow-sm ${activeChat === sub.id
-                  ? 'bg-gray-800 border-indigo-500'
-                  : 'border-transparent hover:border-gray-700 hover:bg-gray-800/80'
-                  }`}
-              >
-                <img src={sub.avatar} alt={sub.name} className="w-10 h-10 rounded-full border border-gray-600 shadow-sm" />
-                <div>
-                  <h4 className="text-sm font-semibold text-gray-200">{sub.name}</h4>
-                  <p className="text-[11px] text-indigo-400 font-medium mt-0.5">{sub.role}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Chat Area & Previews */}
-      <div className="flex-1 flex flex-col relative bg-[#0B0F19] z-10" style={{ backgroundImage: 'radial-gradient(circle at 50% 50%, rgba(15, 20, 35, 0.4) 0%, rgba(11, 15, 25, 1) 100%), repeating-radial-gradient(circle at 0 0, transparent 0, #0B0F19 14px), repeating-linear-gradient(#1f293708, #1f293708 1px, transparent 1px, transparent 24px), repeating-linear-gradient(90deg, #1f293708, #1f293708 1px, transparent 1px, transparent 24px)' }}>
-
-        {/* Decorative Background Glows */}
-        <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none z-0">
-          <div className="absolute top-[-20%] left-[-10%] w-[60%] h-[60%] bg-indigo-600 rounded-full mix-blend-screen filter blur-[150px] opacity-[0.15]"></div>
-          <div className="absolute bottom-[-20%] right-[-10%] w-[60%] h-[60%] bg-pink-600 rounded-full mix-blend-screen filter blur-[150px] opacity-[0.12]"></div>
-          <div className="absolute top-[40%] right-[30%] w-[40%] h-[40%] bg-purple-600 rounded-full mix-blend-screen filter blur-[120px] opacity-[0.1]"></div>
-        </div>
-
-        {(activeTab === 'status' && previewStatus) ? (
-          <div className="flex-1 flex flex-col items-center justify-center p-8 z-20 overflow-y-auto" style={{ scrollbarWidth: "none" }}>
-            <div className="text-center animate-fade-in-up flex flex-col items-center">
-              <div className="relative inline-block mb-8 cursor-pointer group" onClick={() => setViewingStatus(previewStatus)}>
-                <img
-                  src={previewStatus.avatar}
-                  alt="Status Preview"
-                  className="w-56 h-56 object-cover rounded-full border-[6px] border-[#111827] ring-4 ring-indigo-500 shadow-2xl transition-transform duration-300 group-hover:scale-105"
-                />
-                <div className="absolute inset-0 bg-black/50 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-white drop-shadow-lg scale-110 ml-2"><polygon points="5 3 19 12 5 21 5 3" fill="currentColor"></polygon></svg>
-                </div>
-              </div>
-              <h2 className="text-3xl font-bold text-white tracking-wide">{previewStatus.name}</h2>
-              <p className="text-gray-400 mt-2.5 font-medium">{previewStatus.time}</p>
-              <button
-                onClick={() => setViewingStatus(previewStatus)}
-                className="mt-10 px-8 py-3.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-full shadow-lg shadow-indigo-500/20 transition-all flex items-center gap-2.5 mx-auto"
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" /></svg>
-                View Fullscreen
-              </button>
-            </div>
-          </div>
-        ) : (activeTab === 'calls' && previewCall) ? (
-          <div className="flex-1 flex flex-col items-center justify-center p-8 bg-[#0B0F19] z-20 overflow-y-auto" style={{ scrollbarWidth: "none" }}>
-            <div className="text-center animate-fade-in-up flex flex-col items-center">
-              <img
-                src={previewCall.avatar}
-                alt="Call Preview"
-                className="w-48 h-48 object-cover rounded-full border-4 border-[#1F2937] shadow-xl mb-8 mx-auto"
-              />
-              <h2 className="text-3xl font-bold text-white tracking-wide">{previewCall.name}</h2>
-              <p className="text-gray-400 mt-2.5 font-medium">{previewCall.type} • {previewCall.time}</p>
-              <div className="mt-10 flex items-center justify-center gap-4">
-                <button className="px-8 py-3.5 bg-[#1F2937] hover:bg-gray-800 text-green-400 font-semibold rounded-2xl shadow-lg transition-all flex items-center gap-2.5 border border-transparent hover:border-green-500/30">
-                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.64 3.35 2 2 0 0 1 3.61 1h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L7.91 8.6a16 16 0 0 0 6 6l.96-.96a2 2 0 0 1 2.12-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>
-                  Audio Call
-                </button>
-                <button className="px-8 py-3.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-2xl shadow-lg shadow-indigo-500/20 transition-all flex items-center gap-2.5">
-                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
-                  Video Call
-                </button>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <>
-            {/* Chat Header */}
-            <div className="h-[88px] border-b border-gray-800/60 px-8 flex items-center justify-between flex-shrink-0 bg-[#0B0F19]/60 backdrop-blur-2xl z-20 shadow-sm relative">
-              <div
-                className="flex items-center gap-4 cursor-pointer group"
-                onClick={() => setShowContactInfo(!showContactInfo)}
-              >
-                <div className="relative">
-                  <img src={currentContact?.avatar} alt={currentContact?.name} className="w-12 h-12 rounded-full shadow-md object-cover ring-2 ring-transparent group-hover:ring-indigo-500 transition-all duration-300" />
-                  {currentContact?.online && (
-                    <div className="absolute bottom-0 right-[-2px] w-3.5 h-3.5 bg-green-500 border-2 border-[#0B0F19] rounded-full shadow-sm"></div>
-                  )}
-                </div>
-                <div>
-                  <h2 className="text-xl font-bold text-gray-100 tracking-wide group-hover:text-indigo-400 transition-colors drop-shadow-sm">{currentContact?.name}</h2>
-                  <span className={`text-sm font-medium ${currentContact?.online ? 'text-green-400' : 'text-gray-500'}`}>
-                    {currentContact?.online ? 'Online' : 'Offline'}
-                  </span>
-                </div>
-              </div>
-              <div className="flex items-center gap-3 text-gray-400">
-                <button className="p-2.5 bg-gray-800/40 hover:bg-gray-700/60 hover:text-white rounded-xl transition-all shadow-sm">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.64 3.35 2 2 0 0 1 3.61 1h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L7.91 8.6a16 16 0 0 0 6 6l.96-.96a2 2 0 0 1 2.12-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>
-                </button>
-                <button className="p-2.5 bg-gray-800/40 hover:bg-gray-700/60 hover:text-white rounded-xl transition-all shadow-sm">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
-                </button>
-                <div className="w-px h-6 bg-gray-700 mx-1"></div>
-                <button className="p-2.5 hover:bg-gray-800 hover:text-white rounded-xl transition-all">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="1.5"></circle><circle cx="12" cy="5" r="1.5"></circle><circle cx="12" cy="19" r="1.5"></circle></svg>
-                </button>
-              </div>
-            </div>
-
-            {/* Chat Messages */}
-            <div className="flex-1 overflow-y-auto p-8 flex flex-col gap-6 z-10" style={{ scrollbarWidth: "none" }}>
-              <div className="text-center my-4">
-                <span className="bg-gray-800 text-gray-300 px-4 py-1.5 rounded-full text-xs font-bold tracking-widest shadow-sm">
-                  TODAY
-                </span>
-              </div>
-
-              {currentMessages.map((msg) => (
-                <div key={msg.id} className={`flex w-full ${msg.sender === 'me' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`flex max-w-[70%] ${msg.sender === 'me' ? 'flex-row-reverse' : 'flex-row'}`}>
-                    {msg.sender === 'them' && (
-                      <img src={currentContact?.avatar} alt={currentContact?.name?.charAt(0)} className="w-8 h-8 rounded-full flex-shrink-0 mt-auto mr-3 shadow-md" />
-                    )}
-                    <div className={`flex flex-col ${msg.sender === 'me' ? 'items-end' : 'items-start'}`}>
-                      <div className={`px-5 py-3.5 rounded-[22px] shadow-lg transform transition-transform hover:scale-[1.01] ${msg.sender === 'me'
-                        ? 'bg-gradient-to-br from-rose-500 via-fuchsia-500 to-purple-600 text-white rounded-br-sm shadow-fuchsia-500/25 border-t border-fuchsia-400/30'
-                        : 'bg-[#1e2738]/90 backdrop-blur-md text-gray-100 border border-gray-700/60 rounded-bl-sm shadow-black/20 hover:bg-[#252f44]'
-                        } ${msg.text && /^(\p{Extended_Pictographic}|\p{Emoji_Modifier}|\u200D|\uFE0F|\s)+$/u.test(msg.text) && !msg.imageUrl && !msg.imageUrls && !msg.documents && !msg.documentName ? '!bg-none !bg-transparent !shadow-none !border-none !p-0 group-hover:!scale-100' : ''}`}>
-                        {msg.imageUrl && (
-                          <img 
-                            src={msg.imageUrl} 
-                            alt="attachment" 
-                            onClick={() => setViewingImage(msg.imageUrl)}
-                            className="max-w-[200px] sm:max-w-xs rounded-xl mb-1 object-cover border-2 border-white/20 shadow-md ignore-theme cursor-pointer hover:opacity-90 transition-opacity" 
-                          />
-                        )}
-                        {msg.imageUrls && (
-                          <div className={`grid gap-1.5 mb-1 ${msg.imageUrls.length > 1 ? 'grid-cols-2' : 'grid-cols-1'} max-w-[280px] sm:max-w-sm`}>
-                            {msg.imageUrls.map((url, i) => (
-                              <img 
-                                key={i} 
-                                src={url} 
-                                alt="attachment" 
-                                onClick={() => setViewingImage(url)}
-                                className={`rounded-xl object-cover border-2 border-white/20 shadow-md ignore-theme cursor-pointer hover:opacity-90 transition-opacity ${msg.imageUrls.length === 1 ? 'max-w-[200px] sm:max-w-xs' : 'w-full aspect-square'}`} 
-                              />
-                            ))}
-                          </div>
-                        )}
-                        {msg.documentName && (
-                          <div className="flex items-center gap-3 bg-black/20 p-3 rounded-xl border border-white/10 mb-1 max-w-[260px] sm:max-w-[300px]">
-                            <div className="w-10 h-10 shrink-0 bg-indigo-500/20 text-indigo-100 flex items-center justify-center rounded-lg shadow-inner">
-                              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-                            </div>
-                            <div className="overflow-hidden">
-                              <p className="text-[13px] font-bold text-white truncate drop-shadow-md">{msg.documentName}</p>
-                              <a href={msg.documentUrl} download={msg.documentName} className="text-[10px] font-black uppercase tracking-widest text-[#a5b4fc] hover:text-white mt-1 inline-block transition-colors">Download</a>
-                            </div>
-                          </div>
-                        )}
-                        {msg.documents && (
-                           <div className="flex flex-col gap-1.5 mb-1">
-                             {msg.documents.map((doc, i) => (
-                                <div 
-                                  key={i} 
-                                  onClick={() => setViewingDocument({ url: doc.documentUrl, name: doc.documentName })}
-                                  className="group flex items-center gap-3 bg-black/20 hover:bg-black/30 p-3 rounded-xl border border-white/10 max-w-[260px] sm:max-w-[300px] cursor-pointer transition-all shadow-sm hover:shadow-md"
-                                >
-                                   <div className="w-10 h-10 shrink-0 bg-indigo-500/20 group-hover:bg-indigo-500/30 text-indigo-100 flex items-center justify-center rounded-lg shadow-inner transition-colors">
-                                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-                                   </div>
-                                   <div className="overflow-hidden">
-                                     <p className="text-[13px] font-bold text-white truncate drop-shadow-md">{doc.documentName}</p>
-                                     <span className="text-[10px] font-black uppercase tracking-widest text-indigo-300 mt-1 inline-block drop-shadow-sm group-hover:text-indigo-200 transition-colors">Click to view</span>
-                                   </div>
-                                </div>
-                             ))}
-                           </div>
-                        )}
-                        {msg.text && (
-                          <p className={`leading-relaxed break-words tracking-wide ${/^(\p{Extended_Pictographic}|\p{Emoji_Modifier}|\u200D|\uFE0F|\s)+$/u.test(msg.text) && !msg.imageUrl && !msg.imageUrls && !msg.documents && !msg.documentName ? 'text-[50px] leading-tight drop-shadow-sm ignore-theme' : 'text-[15px]'}`}>
-                            {msg.text}
-                          </p>
-                        )}
-                      </div>
-                      <span className="text-xs font-medium text-gray-500 mt-1.5 px-1">{msg.time}</span>
-                    </div>
-                  </div>
-                </div>
-              ))}
-              <div ref={messagesEndRef} />
-            </div>
-
-            {/* Input Area */}
-            <div className="p-6 bg-gradient-to-t from-[#090d16] via-[#0B0F19]/90 to-transparent flex flex-col justify-end z-20">
-              <div className="w-full max-w-4xl mx-auto bg-[#171f2d]/80 backdrop-blur-2xl border border-gray-700/60 rounded-3xl flex items-center px-3 py-3 shadow-2xl focus-within:ring-2 ring-fuchsia-500/40 focus-within:bg-[#1a2333]/90 transition-all duration-300">
-                {/* Responsive Gallery / Attachment Button */}
-                <div className="relative">
-                  <button 
-                    onClick={(e) => { e.stopPropagation(); setShowAttachmentMenu(!showAttachmentMenu); }}
-                    className={`transition-colors p-2.5 rounded-2xl hover:bg-gray-800/60 flex items-center justify-center ${showAttachmentMenu ? 'text-fuchsia-400 bg-gray-800/60' : 'text-gray-400 hover:text-fuchsia-400'}`}
-                  >
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg>
-                  </button>
-                  
-                  {showAttachmentMenu && (
-                    <div 
-                      onClick={(e) => e.stopPropagation()}
-                      className="absolute bottom-full left-0 mb-4 w-56 bg-[#1F2937] border border-gray-700 rounded-2xl shadow-2xl p-2 z-50 animate-fade-in-up origin-bottom-left"
-                    >
-                      <button 
-                        onClick={() => { fileInputRef.current?.click(); setShowAttachmentMenu(false); }}
-                        className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-medium text-gray-200 hover:bg-gray-800 hover:text-white rounded-xl transition-all"
-                      >
-                        <div className="w-8 h-8 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center">
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-                        </div>
-                        Document
-                      </button>
-                      <button 
-                        onClick={() => { imageInputRef.current?.click(); setShowAttachmentMenu(false); }}
-                        className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-medium text-gray-200 hover:bg-gray-800 hover:text-white rounded-xl transition-all mt-1"
-                      >
-                        <div className="w-8 h-8 rounded-full bg-rose-500/20 text-rose-400 flex items-center justify-center">
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
-                        </div>
-                        Photos & Videos
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                {/* Hidden File Inputs */}
-                <input 
-                  type="file" 
-                  ref={fileInputRef} 
-                  className="hidden" 
-                  multiple
-                  onChange={(e) => handleAttachmentSubmit(e, 'document')} 
-                />
-                <input 
-                  type="file" 
-                  accept="image/*,video/*" 
-                  ref={imageInputRef} 
-                  className="hidden" 
-                  multiple
-                  onChange={(e) => handleAttachmentSubmit(e, 'image')} 
-                />
-                <input 
-                  type="text" 
-                  placeholder="Type a message..." 
-                  className="bg-transparent outline-none flex-1 px-4 text-gray-100 placeholder-gray-500 font-medium text-[15px] h-full" 
-                  value={messageInput}
-                  onChange={(e) => setMessageInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleSendMessage();
-                  }}
-                />
-                <div className="relative">
-                  <button 
-                    onClick={(e) => { e.stopPropagation(); setShowEmojiPicker(!showEmojiPicker); }}
-                    className={`transition-colors p-2.5 mr-2 rounded-2xl flex items-center justify-center ${showEmojiPicker ? 'text-amber-400 bg-gray-800/60' : 'text-gray-400 hover:text-amber-400 hover:bg-gray-800/60'}`}
-                  >
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M8 14s1.5 2 4 2 4-2 4-2"></path><line x1="9" y1="9" x2="9.01" y2="9"></line><line x1="15" y1="9" x2="15.01" y2="9"></line></svg>
-                  </button>
-                  
-                  {showEmojiPicker && (
-                    <div 
-                      onClick={(e) => e.stopPropagation()}
-                      className="absolute bottom-full right-0 mb-4 z-50 animate-fade-in-up origin-bottom-right shadow-2xl"
-                    >
-                      <EmojiPicker 
-                        theme={settings.darkMode ? 'dark' : 'light'} 
-                        onEmojiClick={(emojiData) => setMessageInput(prev => prev + emojiData.emoji)} 
-                      />
-                    </div>
-                  )}
-                </div>
-                <button 
-                  onClick={handleSendMessage}
-                  className="w-11 h-11 bg-gradient-to-br from-fuchsia-500 via-rose-500 to-amber-500 rounded-2xl flex items-center justify-center text-white hover:from-fuchsia-400 hover:to-amber-400 shadow-lg shadow-rose-500/30 transition-all transform hover:scale-105 active:scale-95 border-t border-fuchsia-400/30"
-                >
-                  <SendIcon />
-                </button>
-              </div>
-            </div>
-          </>
-        )}
-
-      </div>
-
-      {/* Contact Info Right Sidebar */}
-      {showContactInfo && currentContact && (
-        <div className="w-[300px] md:w-[350px] bg-[#111827] flex flex-col border-l border-gray-800 shadow-2xl z-20 transition-transform duration-300">
-
-          <div className="h-[88px] border-b border-gray-800 px-6 flex items-center justify-between sticky top-0 bg-[#111827] bg-opacity-95 backdrop-blur-sm z-10">
-            <h2 className="text-lg font-bold text-white tracking-wide">
-              {currentContact.isGroup ? 'Group Info' : 'Contact Info'}
-            </h2>
-            <button
-              onClick={() => setShowContactInfo(false)}
-              className="p-2 text-gray-400 hover:text-white hover:bg-gray-800 rounded-full transition-colors"
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-            </button>
-          </div>
-
-          <div className="p-6 flex flex-col items-center border-b border-gray-800">
-            <img src={currentContact.avatar} alt={currentContact.name} className="w-28 h-28 rounded-full object-cover border-4 border-[#1F2937] shadow-xl mb-4" />
-            <h3 className="text-xl font-bold text-white mb-1">{currentContact.name}</h3>
-            {currentContact.isGroup ? (
-              <p className="text-sm font-medium text-gray-400">12 Participants</p>
-            ) : (
-              <p className={`text-sm font-medium ${currentContact.online ? 'text-green-400' : 'text-gray-500'}`}>
-                {currentContact.online ? 'Online' : 'Offline'}
-              </p>
-            )}
-          </div>
-
-          <div className="p-6 space-y-6 flex-1 overflow-y-auto" style={{ scrollbarWidth: "none" }}>
-            {currentContact.isGroup ? (
-              <div>
-                <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-3">Participants (12)</h4>
-                <div className="space-y-1 bg-[#1F2937] p-2 rounded-xl shadow-inner border border-gray-700">
-                  <div className="flex items-center justify-between p-2 hover:bg-gray-800 rounded-lg cursor-pointer transition-colors">
-                    <div className="flex items-center gap-3">
-                      <img src={myProfile.avatar} className="w-9 h-9 rounded-full border border-gray-600" alt="You" />
-                      <div>
-                        <p className="text-sm text-white font-medium">You</p>
-                        <p className="text-[10px] text-green-400 font-bold uppercase tracking-wider mt-0.5">Group Admin</p>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3 p-2 hover:bg-gray-800 rounded-lg cursor-pointer transition-colors">
-                    <img src="https://i.pravatar.cc/150?u=12" className="w-9 h-9 rounded-full border border-gray-600" alt="Participant" />
-                    <p className="text-sm text-gray-200 font-medium">Alice Freeman</p>
-                  </div>
-                  <div className="flex items-center gap-3 p-2 hover:bg-gray-800 rounded-lg cursor-pointer transition-colors">
-                    <img src="https://i.pravatar.cc/150?u=13" className="w-9 h-9 rounded-full border border-gray-600" alt="Participant" />
-                    <p className="text-sm text-gray-200 font-medium">Bob Smith</p>
-                  </div>
-                  <div className="flex items-center gap-3 p-2 hover:bg-gray-800 rounded-lg cursor-pointer transition-colors">
-                    <div className="w-9 h-9 rounded-full bg-gray-800 border border-gray-600 flex items-center justify-center text-gray-400 text-xs font-bold shadow-sm">+9</div>
-                    <p className="text-sm text-gray-400 font-medium tracking-wide">View all</p>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div>
-                <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-3">About</h4>
-                <p className="text-sm text-gray-300 leading-relaxed bg-[#1F2937] p-4 rounded-xl shadow-inner border border-gray-700">
-                  Hey there! I am using this premium chat interface. Let's build something amazing together! 🚀
-                </p>
-              </div>
-            )}
-
-            <div>
-              <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-3">Media, Links & Docs</h4>
-              <div className="grid grid-cols-3 gap-2">
-                <div className="aspect-square bg-gray-800 rounded-lg shadow-sm border border-gray-700"></div>
-                <div className="aspect-square bg-gray-800 rounded-lg shadow-sm border border-gray-700"></div>
-                <div className="aspect-square bg-[#1F2937] rounded-lg flex items-center justify-center text-xs text-indigo-400 font-bold cursor-pointer hover:bg-gray-800 transition-colors border border-gray-700">
-                  +12
-                </div>
-              </div>
-            </div>
-
-            <div className="pt-6 border-t border-gray-800 space-y-2.5">
-              <button className="w-full py-2.5 bg-[#1F2937] hover:bg-gray-800 text-white text-sm font-semibold rounded-xl transition-colors shadow-sm border border-gray-700">
-                Share {currentContact.isGroup ? 'Group Link' : 'Contact'}
-              </button>
-              {!currentContact.isGroup && (
-                <button className="w-full py-2.5 text-red-400 hover:bg-red-500/10 text-sm font-semibold rounded-xl transition-colors border border-transparent hover:border-red-500/30">
-                  Block User
-                </button>
-              )}
-              <button className="w-full py-2.5 text-red-500 hover:bg-red-500/10 text-sm font-semibold rounded-xl transition-colors border border-transparent hover:border-red-500/30">
-                {currentContact.isGroup ? 'Exit Group' : 'Report Contact'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
     </div>
   );
 };

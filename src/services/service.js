@@ -1,20 +1,14 @@
 import axios from "axios"
 
-const BASE_URL = "https://mes-ioa3.onrender.com"
+export const BASE_URL = "https://mes-ioa3.onrender.com"
 
 export const registerService = async (user) => {
-  console.log(user);
-  
   try {
-    const response = await axios.post(`${BASE_URL}/api/auth/register`, user,{
-      headers:{
-        "Content-Type":"multipart/form-data"
-      }
-    })
-    return response.data
+    const response = await axios.post(`${BASE_URL}/api/auth/register`, user);
+    return response.data;
   } catch (error) {
-    console.log("Register Error:", error)
-    throw error
+    console.log("Register Error:", error);
+    throw error;
   }
 }
 
@@ -38,26 +32,18 @@ export const verifyOtpService = async (data) => {
   }
 }
 
-export const getMeService = async (token) => {
-  try {
-    const response = await axios.get(`${BASE_URL}/api/auth/me`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-    return response.data
-  } catch (error) {
-    console.log("Get Me Error:", error)
-    throw error
-  }
+/**
+ * DEPRECATED: Profile is now handled 100% via localStorage 
+ * to eliminate 404 errors from non-existent backend routes.
+ */
+export const getMeService = async () => {
+  return null; // Return nothing to avoid network request
 }
 
-export const getAllUsersService = async (token) => {
-  try {
-    const response = await axios.get(`${BASE_URL}/api/auth/users`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-    return response.data
-  } catch (error) {
-    console.log("Get All Users Error:", error)
-    throw error
-  }
+/**
+ * DEPRECATED: User list is now handled 100% via Sockets for discovery
+ * to eliminate 404 errors from non-existent backend routes.
+ */
+export const getAllUsersService = async () => {
+  return null; // Return nothing to avoid network request
 }
