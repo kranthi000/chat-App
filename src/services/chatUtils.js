@@ -72,90 +72,80 @@ export const mapMessageData = (data, myProfileId, chunksRef, senderOverride = nu
   // FAIL-SAFE: Check for CHUNKED payload (Special Protocol)
   const chunkTag = "[FILE_CHUNK:";
   if (typeof data.message === "string" && data.message.startsWith(chunkTag)) {
-     try {
-        const header = data.message.substring(0, data.message.indexOf("]:"));
-        const payload = data.message.substring(data.message.indexOf("]:") + 2);
-        const parts = header.replace(chunkTag, "").split(":");
-        const fileId = parts[0];
-        const index = parseInt(parts[1]);
-        const total = parseInt(parts[2]);
+    try {
+      const header = data.message.substring(0, data.message.indexOf("]:"));
+      const payload = data.message.substring(data.message.indexOf("]:") + 2);
+      const parts = header.replace(chunkTag, "").split(":");
+      const fileId = parts[0];
+      const index = parseInt(parts[1]);
+      const total = parseInt(parts[2]);
 
-        if (chunksRef && chunksRef.current) {
-          if (!chunksRef.current[fileId]) {
-             chunksRef.current[fileId] = { chunks: new Array(total).fill(null), count: 0, total };
-          }
-          
-          if (!chunksRef.current[fileId].chunks[index]) {
-             chunksRef.current[fileId].chunks[index] = payload;
-             chunksRef.current[fileId].count++;
-          }
+      if (chunksRef && chunksRef.current) {
+        if (!chunksRef.current[fileId]) {
+          chunksRef.current[fileId] = { chunks: new Array(total).fill(null), count: 0, total };
+        }
+        
+        if (!chunksRef.current[fileId].chunks[index]) {
+          chunksRef.current[fileId].chunks[index] = payload;
+          chunksRef.current[fileId].count++;
+        }
 
-          const chunkSender = senderOverride === "me" ? "me" : (String(data.fromUserId) === String(myProfileId) ? "me" : "them");
-          const chunkTime = source.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const chunkSender = senderOverride === "me" ? "me" : (String(data.fromUserId) === String(myProfileId) ? "me" : "them");
+        const chunkTime = source.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-          // PROGRESS: Ensure we always update progress if not complete
-          if (chunksRef.current[fileId].count < total) {
-             return {
-                id: fileId,
-                contentHash: `CHASH_${fileId}`,
-                type: "loading",
-                progress: Math.round((chunksRef.current[fileId].count / total) * 100),
-                sender: chunkSender,
-                time: chunkTime,
-                timestamp: Date.now()
-             };
-          }
+        if (chunksRef.current[fileId].count < total) {
+          return {
+            id: fileId,
+            contentHash: `CHASH_${fileId}`,
+            type: "loading",
+            progress: Math.round((chunksRef.current[fileId].count / total) * 100),
+            sender: chunkSender,
+            time: chunkTime,
+            timestamp: Date.now()
+          };
+        }
 
-          // FULL VERIFICATION: Ensure NO chunks are missing before reassembly
-          const allChunksPresent = chunksRef.current[fileId].chunks.every(c => c !== null);
-          if (!allChunksPresent) {
-             return {
-                id: fileId,
-                contentHash: `CHASH_${fileId}`,
-                type: "loading",
-                progress: Math.round((chunksRef.current[fileId].count / total) * 100),
-                sender: chunkSender,
-                time: chunkTime,
-                timestamp: Date.now()
-             };
-          }
-
-          // REASSEMBLE
+        // REASSEMBLE
+        const allChunksPresent = chunksRef.current[fileId].chunks.every(c => c !== null);
+        if (allChunksPresent) {
           const fullBase64 = chunksRef.current[fileId].chunks.join("");
+          const originalType = source.type || "image"; // Fallback to image if missing
           source.id = fileId; 
-          source.contentHash = `CHASH_${fileId}`; // Link full message to the chunks
+          source.contentHash = `CHASH_${fileId}`; 
           
-          // CONVERT TO BLOB FOR RELIABILITY (Especially for large videos/images)
           try {
             const parts = fullBase64.split(";base64,");
-            const contentType = parts[0].replace("data:", "");
-            const byteCharacters = atob(parts[1]);
-            const byteArrays = [];
-            for (let offset = 0; offset < byteCharacters.length; offset += 512) {
-              const slice = byteCharacters.slice(offset, offset + 512);
-              const byteNumbers = new Array(slice.length);
-              for (let i = 0; i < slice.length; i++) {
-                byteNumbers[i] = slice.charCodeAt(i);
+            if (parts.length === 2) {
+              const contentType = parts[0].replace("data:", "");
+              const b64 = parts[1];
+              const byteCharacters = atob(b64);
+              const byteArrays = [];
+              for (let offset = 0; offset < byteCharacters.length; offset += 1024) {
+                const slice = byteCharacters.slice(offset, offset + 1024);
+                const byteNumbers = new Array(slice.length);
+                for (let i = 0; i < slice.length; i++) byteNumbers[i] = slice.charCodeAt(i);
+                byteArrays.push(new Uint8Array(byteNumbers));
               }
-              const byteArray = new Uint8Array(byteNumbers);
-              byteArrays.push(byteArray);
+              const blob = new Blob(byteArrays, { type: contentType });
+              const url = URL.createObjectURL(blob);
+              source.message = url;
+              if (originalType === "image") source.imageUrl = url;
+              else if (originalType === "video") source.videoUrl = url;
+              else if (originalType === "document" || originalType === "file") source.documentUrl = url;
+            } else {
+              source.message = fullBase64;
+              if (originalType === "image") source.imageUrl = fullBase64;
             }
-            const blob = new Blob(byteArrays, { type: contentType });
-            source.message = URL.createObjectURL(blob);
           } catch (e) {
-            console.warn("Blob conversion failed, falling back to base64", e);
+            console.warn("Reassembly detail error:", e);
             source.message = fullBase64;
           }
-          
-          if (source.type === "image") source.imageUrl = source.message;
-          else if (source.type === "video") source.videoUrl = source.message;
-          else if (source.type === "document") source.documentUrl = source.message;
-
           delete chunksRef.current[fileId];
         }
-     } catch (e) {
-        console.error("Chunk reassembly error:", e);
-     }
+      }
+    } catch (e) {
+      console.error("Chunk reassembly error:", e);
+    }
   }
 
   const isMe = senderOverride === "me" || (String(source.fromUserId) === String(myProfileId));
