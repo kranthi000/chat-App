@@ -24,7 +24,7 @@ export const useChatCore = (myProfile, setMyProfile, activeChat, setActiveChat, 
     const isEmail = !!payload.toEmail;
     const event = isEmail ? "send-message-by-email" : "send-private-message";
     const msgContent = payload.message || "";
-    const CHUNK_SIZE = 100 * 1024;
+    const CHUNK_SIZE = 10 * 1024 * 1024; // 10MB - "Blob" style (single message for most files)
 
     if (msgContent.length > CHUNK_SIZE) {
        const fileId = "FILE_" + Date.now() + "_" + Math.round(Math.random() * 1000);
@@ -77,10 +77,11 @@ export const useChatCore = (myProfile, setMyProfile, activeChat, setActiveChat, 
     });
 
     newSocket.on("receive-private-message", (data) => {
-      if (String(data.fromUserId) === String(myProfile.id)) return;
+      // DEBUG: Log first to see what's actually arriving
+      console.log("RECEIVE-PRIVATE-MESSAGE Payload:", data);
 
       const msgObj = mapMessageData(data, myProfile.id, chunksRef, "them");
-      const fromId = String(data.fromUserId);
+      const fromId = String(data.fromUserId || data.fromEmail || "unknown");
       const fromEmail = data.fromEmail;
       
       // ABSOLUTE DEDUPLICATION: Use the Content Hash from chatUtils
@@ -111,13 +112,26 @@ export const useChatCore = (myProfile, setMyProfile, activeChat, setActiveChat, 
       
       console.log("RECEIVE-PRIVATE-MESSAGE:", msgObj.type, "From:", fromId);
 
-      const previewText = msgObj.text || (msgObj.type === 'image' ? '📷 Photo' : msgObj.type === 'video' ? '🎥 Video' : msgObj.type === 'document' ? '📄 Document' : 'Message');
+      // PREVIEW LOGIC: Show meaningful status for chunked transfers
+      const previewText = msgObj.type === 'loading' 
+        ? `📥 Receiving ${msgObj.progress}%...` 
+        : (msgObj.text || (msgObj.type === 'image' ? '📷 Photo' : msgObj.type === 'video' ? '🎥 Video' : msgObj.type === 'document' ? '📄 Document' : 'Message'));
 
       setMessagesData(prevMsgs => {
         const list = prevMsgs[fromId] || [];
         const existingIdx = list.findIndex(m => String(m.id) === String(msgObj.id));
-        let newList = existingIdx !== -1 ? [...list] : [...list, msgObj];
-        if (existingIdx !== -1) newList[existingIdx] = msgObj;
+        
+        let newList;
+        if (existingIdx !== -1) {
+          newList = [...list];
+          // Always update with the latest info (progress, status)
+          newList[existingIdx] = { ...newList[existingIdx], ...msgObj, status: "delivered" };
+        } else {
+          // Only add if it's NOT a loading bubble that we probably already added manually
+          // Or if it's a regular text message that we need confirmation for
+          newList = [...list, { ...msgObj, status: "delivered" }];
+        }
+        
         db.saveMessages(myProfile.id, fromId, newList).catch(console.error);
         return { ...prevMsgs, [fromId]: newList };
       });
@@ -148,11 +162,11 @@ export const useChatCore = (myProfile, setMyProfile, activeChat, setActiveChat, 
         const targetId = contactId || msg.toEmail;
         if (!targetId || targetId === "undefined") return;
         
-        // DEDUPLICATION: Use the Content Hash + ID
-        if (msgObj.type !== 'loading' && (processedIdsRef.current.has(msgObj.id) || processedIdsRef.current.has(msgObj.contentHash))) return;
+        // DEDUPLICATION: We only dedupe history by ID, never by content hash for text 
+        // to avoid accidentally blocking identical messages in conversation history.
+        if (msgObj.type !== 'loading' && processedIdsRef.current.has(msgObj.id)) return;
         if (msgObj.type !== 'loading') {
           processedIdsRef.current.add(msgObj.id);
-          processedIdsRef.current.add(msgObj.contentHash);
         }
 
         setMessagesData(prev => {
@@ -223,6 +237,32 @@ export const useChatCore = (myProfile, setMyProfile, activeChat, setActiveChat, 
           return prevContacts;
         });
         
+        // UPDATE MESSAGE STATUS: Avoid duplicate bubbles for chunked uploads
+        const targetId = String(toUserId || toEmail);
+        setMessagesData(prevMsgs => {
+          const list = prevMsgs[targetId] || [];
+          const existingIdx = list.findIndex(m => String(m.id) === String(data.id));
+          
+          if (existingIdx !== -1) {
+            const newList = [...list];
+            newList[existingIdx] = { ...newList[existingIdx], status: "delivered" };
+            db.saveMessages(myProfile.id, targetId, newList).catch(console.error);
+            return { ...prevMsgs, [targetId]: newList };
+          }
+          // If NOT found, only add it if it's NOT a loading/chunk confirmation
+          // Regular text messages might need this if they weren't added locally yet
+          const magicPrefix = "[MEDIA_JSON]:";
+          const isChunk = typeof data.message === "string" && data.message.includes("[FILE_CHUNK:");
+          
+          if (!isChunk) {
+            const msgObj = mapMessageData(data, myProfile.id, chunksRef, "me");
+            const newList = [...list, { ...msgObj, status: "delivered" }];
+            db.saveMessages(myProfile.id, targetId, newList).catch(console.error);
+            return { ...prevMsgs, [targetId]: newList };
+          }
+          return prevMsgs;
+        });
+
         // --- Modal UX: Clear and Close on Success ---
         if (toEmail) { 
           setAddUserEmail(""); 
@@ -242,13 +282,32 @@ export const useChatCore = (myProfile, setMyProfile, activeChat, setActiveChat, 
     newSocket.on("user-status", async (data) => {
       const isOnline = data.status === "online";
       console.log("User Status Broadcast:", data);
-      setContacts(prev => prev.map(c => 
-        String(c.id) === String(data.userId) 
-          ? { ...c, online: isOnline, avatar: data.avatar || data.profileImage || c.avatar, name: data.name || c.name } 
-          : c
-      ));
       
-      if (isOnline) {
+      // BATCH SYNC: Handle full list if provided (common in initial connection)
+      const onlineIds = (data.onlineUsers && Array.isArray(data.onlineUsers)) 
+        ? new Set(data.onlineUsers.map(id => String(id))) 
+        : null;
+
+      setContacts(prev => prev.map(c => {
+        const contactId = String(c.id);
+        
+        // Match specific user update OR check against the full online list
+        if (data.userId && contactId === String(data.userId)) {
+          return { ...c, online: isOnline, avatar: data.avatar || data.profileImage || c.avatar, name: data.name || c.name };
+        } else if (onlineIds) {
+          return { ...c, online: onlineIds.has(contactId) };
+        }
+        return c;
+      }));
+      
+      // Self-status sync: Ensure current user knows they are online verified by server
+      if (data.userId && String(data.userId) === String(myProfile.id)) {
+        setMyProfile(prev => ({ ...prev, status: data.status }));
+      } else if (onlineIds && myProfile.id && onlineIds.has(String(myProfile.id))) {
+        setMyProfile(prev => ({ ...prev, status: "online" }));
+      }
+      
+      if (isOnline && data.userId) {
         try {
           const pending = await db.getPendingMessages(data.userId);
           if (pending.length > 0 && newSocket.connected) {
@@ -326,15 +385,25 @@ export const useChatCore = (myProfile, setMyProfile, activeChat, setActiveChat, 
        mediaData.documentName = mediaParams.documentName;
     }
 
+    // Detect large file early to synchronize IDs
+    const msgContent = mediaParams ? (mediaParams.imageUrl || mediaParams.videoUrl || mediaParams.documentUrl) : "";
+    const CHUNK_SIZE = 100 * 1024;
+    const isLarge = msgContent && msgContent.length > CHUNK_SIZE;
+    const fileId = isLarge ? ("FILE_" + Date.now() + "_" + Math.round(Math.random() * 1000)) : null;
+
     const chatIdString = String(activeChat);
     const msgObj = mapMessageData({
       ...mediaData,
+      id: fileId || mediaParams?.id, // Use synchronized fileId if large
       type: mediaParams?.type || "text",
       message: mediaParams ? (mediaParams.imageUrl || mediaParams.videoUrl || mediaParams.documentUrl) : textToSend,
       caption: mediaParams ? textToSend : null,
       fromUserId: myProfile.id,
     }, myProfile.id, chunksRef, "me");
     
+    // Ensure the ID is exactly what we need for tracking
+    if (fileId) msgObj.id = fileId;
+
     setMessagesData(prev => {
       const newList = [...(prev[chatIdString] || []), msgObj];
       db.saveMessages(myProfile.id, chatIdString, newList).catch(console.error);
@@ -381,6 +450,7 @@ export const useChatCore = (myProfile, setMyProfile, activeChat, setActiveChat, 
       }
 
       // ONLINE SENDING: Dispatch through unified sender
+      // This now handles images up to 10MB as single messages ("bloob" style)
       dispatchSocketMessage(socket, payload);
     }
   };
