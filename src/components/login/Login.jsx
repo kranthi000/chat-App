@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { useDispatch } from "react-redux";
 import toast, { Toaster } from "react-hot-toast";
 import { useNavigate } from "react-router-dom";
-import { loginService } from "../../services/service";
+import { loginService as loginUserService } from "../../services/service";
 import { setActiveUser } from "../../chatSlice";
 
 /* ─────────────────────────────────────────────────────────────
@@ -155,13 +155,16 @@ function Field({ icon, placeholder, type, value, onChange, suffix }) {
    MAIN LOGIN COMPONENT
 ───────────────────────────────────────────────────────────── */
 export default function Login() {
-  const [phase, setPhase]       = useState("walk"); // "walk" | "form"
-  const [formData, setFormData] = useState({ email: "", password: "" });
-  const [showPw, setShowPw]     = useState(false);
-  const [loading, setLoading]   = useState(false);
+  const [phase, setPhase] = useState("walk"); // "walk" | "form"
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [isHovered, setIsHovered] = useState(false);
+  const [tilt, setTilt] = useState({ x: 0, y: 0 });
+  const [showPw, setShowPw] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   const dispatch = useDispatch();
-   const navigate  = useNavigate();
+  const navigate = useNavigate();
 
   /* Walk-in → show form */
   useEffect(() => {
@@ -169,46 +172,64 @@ export default function Login() {
     return () => clearTimeout(t);
   }, []);
 
-  const set = (k) => (e) => setFormData((f) => ({ ...f, [k]: e.target.value }));
+  const handleMouseMove = (e) => {
+    const card = e.currentTarget;
+    const rect = card.getBoundingClientRect();
+    const centerX = rect.width / 2;
+    const centerY = rect.height / 2;
+    const rotateX = ((e.clientY - rect.top - centerY) / centerY) * -6;
+    const rotateY = ((e.clientX - rect.left - centerX) / centerX) * 6;
+    setTilt({ x: rotateX, y: rotateY });
+  };
+
+  const handleMouseLeave = () => setTilt({ x: 0, y: 0 });
 
   /* ── Submit ── */
   async function handleSubmit(e) {
     e.preventDefault();
-    const { email, password } = formData;
-    if (!email || !password) {
-      toast.error("All fields are required", toastCfg);
-      return;
-    }
-    setLoading(true);
-    try {
-      const response = await loginService({ email, password });
-      
-      // Store token if returned
-      if (response.token) {
-        localStorage.setItem("chat_token", response.token);
-      }
-      
-      dispatch(setActiveUser(response.user || response));
-      
-      toast.success("Welcome back! 🎉", toastCfg);
-      setFormData({ email: "", password: "" });
-      setTimeout(() => navigate("/chat"), 2000);
 
-    } catch (err) {
-      console.error(err);
-      toast.error("Invalid email or password.", toastCfg);
-    } finally {
-      setLoading(false);
+    try {
+      const response = await loginUserService({
+        email: email,
+        password: password
+      });
+
+      if (response) {
+        // Update user in Redux
+        dispatch(setActiveUser(response.user || response));
+
+        // OPTIONAL: Save to localStorage so you stay logged in after refresh
+        try {
+          localStorage.setItem('user', JSON.stringify(response.user || response));
+        } catch (e) {
+          if (e.name === 'QuotaExceededError') {
+            console.warn("Storage Quota Exceeded. Attempting surgical cleanup...");
+            localStorage.clear(); 
+            localStorage.setItem('user', JSON.stringify(response.user || response));
+          } else {
+            console.error("Local Storage Error:", e);
+          }
+        }
+
+        alert("Login Successful! Redirecting...");
+        navigate('/chat');
+      }
+    } catch (error) {
+      console.error("Login component error:", error);
+      
+      // Pull specific error message from server if available
+      const serverMessage = error.response?.data?.message || "Invalid email or password. Please try again.";
+      alert(serverMessage);
     }
   }
 
   /* ── Floating background bubbles ── */
   const bubbles = [
-    { text: "Welcome back! 👋",  top: "12%",    left: "5%",   delay: "0s"   },
-    { text: "Good to see you 😊", top: "25%",   right: "4%",  delay: "0.8s" },
-    { text: "Miss us? ☀️",        bottom: "30%", left: "3%",  delay: "1.4s" },
-    { text: "Let's chat! 💬",     bottom: "20%", right: "5%", delay: "0.4s" },
-    { text: "Sign in 🔐",         top: "8%",    right: "20%", delay: "1.8s" },
+    { text: "Welcome back! 👋", top: "12%", left: "5%", delay: "0s" },
+    { text: "Good to see you 😊", top: "25%", right: "4%", delay: "0.8s" },
+    { text: "Miss us? ☀️", bottom: "30%", left: "3%", delay: "1.4s" },
+    { text: "Let's chat! 💬", bottom: "20%", right: "5%", delay: "0.4s" },
+    { text: "Sign in 🔐", top: "8%", right: "20%", delay: "1.8s" },
   ];
 
   return (
@@ -240,8 +261,12 @@ export default function Login() {
 
       {/* Brand */}
       <div style={s.brand} className={phase === "form" ? "brand-show" : ""}>
-        <div style={s.brandIcon}>💬</div>
-        <span style={s.brandName}>ChatApp</span>
+        <div style={s.brandIconContainer}>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" />
+          </svg>
+        </div>
+        <span style={s.brandName}>ChatFlow</span>
       </div>
 
       {/* Characters */}
@@ -260,8 +285,14 @@ export default function Login() {
 
       {/* ── Login card ── */}
       <div
-        style={s.formCard}
-        className={phase === "form" ? "card-show" : "card-hidden"}
+        onMouseMove={handleMouseMove}
+        onMouseLeave={handleMouseLeave}
+        style={{ 
+          ...s.formCard, 
+          ...(phase === "form" ? s.cardShow : s.cardHidden),
+          transform: `translate(-50%, -50%) perspective(1000px) rotateX(${tilt.x}deg) rotateY(${tilt.y}deg)`,
+          transition: 'transform 0.2s ease-out'
+        }}
       >
         <div style={s.cardGlow} />
 
@@ -271,34 +302,34 @@ export default function Login() {
           <p style={s.cardSub}>Sign in to continue the conversation</p>
         </div>
 
-        <form onSubmit={handleSubmit} style={s.form}>
+          <form onSubmit={handleSubmit} style={s.form}>
 
-          {/* Email */}
-          <Field
-            icon={<MailIcon />}
-            placeholder="Email Address"
-            type="email"
-            value={formData.email}
-            onChange={set("email")}
-          />
+            {/* Email */}
+            <Field
+              icon={<MailIcon />}
+              placeholder="Enter Your Mail"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
 
-          {/* Password */}
-          <Field
-            icon={<LockIcon />}
-            placeholder="Password"
-            type={showPw ? "text" : "password"}
-            value={formData.password}
-            onChange={set("password")}
-            suffix={
-              <button
-                type="button"
-                onClick={() => setShowPw((v) => !v)}
-                style={s.eyeBtn}
-              >
-                {showPw ? <EyeOff /> : <EyeOn />}
-              </button>
-            }
-          />
+            {/* Password */}
+            <Field
+              icon={<LockIcon />}
+              placeholder="Enter Your Password"
+              type={showPw ? "text" : "password"}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              suffix={
+                <button
+                  type="button"
+                  onClick={() => setShowPw((v) => !v)}
+                  style={s.eyeBtn}
+                >
+                  {showPw ? <EyeOff /> : <EyeOn />}
+                </button>
+              }
+            />
 
           {/* Forgot password */}
           <div style={s.forgotRow}>
@@ -395,20 +426,35 @@ const s = {
     zIndex: 20, display: "flex", alignItems: "center", gap: 10,
     opacity: 0, transition: "opacity .6s ease .4s",
   },
-  brandIcon: { fontSize: 28 },
+  brandIconContainer: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    background: "linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #ec4899 100%)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    boxShadow: "0 10px 25px rgba(99, 102, 241, 0.3)",
+    transform: "rotate(-2deg)",
+  },
   brandName: {
-    fontFamily: "'Fraunces', serif", fontSize: 24, fontWeight: 700,
-    color: "#fff", letterSpacing: "0.04em",
-    textShadow: "0 2px 20px rgba(0,0,0,0.5)",
+    fontFamily: "'DM Sans', sans-serif",
+    fontSize: 26,
+    fontWeight: 900,
+    background: "linear-gradient(to right, #fff, #fbcfe8)",
+    WebkitBackgroundClip: "text",
+    WebkitTextFillColor: "transparent",
+    letterSpacing: "-0.04em",
+    textTransform: "uppercase",
   },
   boyWalk: { left: "-20%" },
-  boyForm:  { left: "calc(50% - 310px)" },
+  boyForm: { left: "calc(50% - 310px)" },
   boyWrap: {
     position: "absolute", bottom: "14%", zIndex: 10,
     width: 160, transition: "left 1.6s cubic-bezier(.22,1,.36,1)",
   },
   girlWalk: { right: "-20%" },
-  girlForm:  { right: "calc(50% - 310px)" },
+  girlForm: { right: "calc(50% - 310px)" },
   girlWrap: {
     position: "absolute", bottom: "14%", zIndex: 10,
     width: 160, transition: "right 1.6s cubic-bezier(.22,1,.36,1)",

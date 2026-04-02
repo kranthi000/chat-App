@@ -2105,8 +2105,22 @@ export default function OtpVerify() {
     try {
       const response = await verifyOtpService({ email, otp: code });
       
+      const safeStore = (key, value) => {
+        try {
+          localStorage.setItem(key, value);
+        } catch (e) {
+          if (e.name === 'QuotaExceededError') {
+            console.warn("Storage Quota Exceeded. Attempting surgical cleanup...");
+            localStorage.clear(); 
+            localStorage.setItem(key, value);
+          } else {
+            console.error("Local Storage Error:", e);
+          }
+        }
+      };
+
       if (response.token) {
-        localStorage.setItem("chat_token", response.token);
+        safeStore("chat_token", response.token);
       }
       
       dispatch(setActiveUser(response.user || response));
@@ -2165,8 +2179,12 @@ export default function OtpVerify() {
 
       {/* ── Brand ── */}
       <div style={s.brand}>
-        <span style={s.brandIcon}>💬</span>
-        <span style={s.brandName}>ChatApp</span>
+        <div style={s.brandIconContainer}>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" />
+          </svg>
+        </div>
+        <span style={s.brandName}>ChatFlow</span>
       </div>
 
       {/* ── Envelope floats above card ── */}
@@ -2300,11 +2318,26 @@ const s = {
     position: "absolute", top: 28, left: "50%", transform: "translateX(-50%)",
     zIndex: 20, display: "flex", alignItems: "center", gap: 10,
   },
-  brandIcon: { fontSize: 28 },
+  brandIconContainer: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    background: "linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #ec4899 100%)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    boxShadow: "0 10px 25px rgba(99, 102, 241, 0.3)",
+    transform: "rotate(-2deg)",
+  },
   brandName: {
-    fontFamily: "'Fraunces', serif", fontSize: 24, fontWeight: 700,
-    color: "#fff", letterSpacing: "0.04em",
-    textShadow: "0 2px 20px rgba(0,0,0,0.5)",
+    fontFamily: "'DM Sans', sans-serif",
+    fontSize: 26,
+    fontWeight: 900,
+    background: "linear-gradient(to right, #fff, #fbcfe8)",
+    WebkitBackgroundClip: "text",
+    WebkitTextFillColor: "transparent",
+    letterSpacing: "-0.04em",
+    textTransform: "uppercase",
   },
   particle: {
     position: "absolute", zIndex: 3, fontSize: 20,
