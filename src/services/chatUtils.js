@@ -181,33 +181,14 @@ export const mapMessageData = (data, myProfileId, chunksRef, senderOverride = nu
   // STABLE CONTENT HASH: Use content snippet for deduplication
   const contentSnippet = isBlob 
     ? `BLOB_${source.message.size}_${source.message.type}` 
-    : messageContent.substring(0, 100).replace(/\s/g, '');
+    : messageContent.substring(0, 50).replace(/\s/g, '');
   const contentHash = `CHASH_${source.fromUserId}_${finalType}_${contentSnippet}`;
   
-  // FINGERPRINTING: Create a stable ID if the server didn't provide one.
-  const isChunk = typeof source.message === "string" && source.message.startsWith("[FILE_CHUNK:");
-  if (isChunk && source.id) {
-     return {
-        ...source,
-        id: String(source.id),
-        contentHash,
-        text: source.caption || null,
-        sender: isMe ? "me" : "them",
-        time: source.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        timestamp: source.createdAt || Date.now(),
-        type: finalType,
-        imageUrl: finalType === "image" ? resolveMediaURL(img) : null,
-        videoUrl: finalType === "video" ? resolveMediaURL(vid) : null,
-        documentUrl: finalType === "document" ? resolveMediaURL(doc) : null,
-        documentName: source.documentName || source.fileName || source.name || "File",
-     };
-  }
-
-  // Stable Hash: Quantize time to nearest 100ms for text to be super responsive.
+  // DETERMINISTIC FINGERPRINTING: (Bug Fix: Remove randomness to prevent multiple bubbles)
   const isMediaMsg = finalType === "image" || finalType === "video" || finalType === "document";
-  const timeFingerprint = isMediaMsg ? Math.floor(Date.now() / 1000) : Date.now(); 
-  const randomTag = Math.floor(Math.random() * 10000);
-  const fingerprint = `FP_${source.fromUserId}_${timeFingerprint}_${randomTag}_${contentSnippet.substring(0, 20)}`;
+  const sourceTimestamp = source.createdAt || source.timestamp || Date.now();
+  // Include timestamp in fingerprint for uniqueness per-message-even-from-same-sender
+  const fingerprint = `FP_${source.fromUserId}_${finalType}_${sourceTimestamp}_${contentSnippet.substring(0, 20)}`;
   const finalId = String(source.id || source._id || fingerprint);
 
   return {

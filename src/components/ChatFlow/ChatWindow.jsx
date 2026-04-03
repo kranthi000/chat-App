@@ -51,7 +51,6 @@ const ChatWindow = (props) => {
         imageInputRef={props.imageInputRef}
         handleAttachmentSubmit={props.handleAttachmentSubmit}
       />
-
     </div>
   );
 };
