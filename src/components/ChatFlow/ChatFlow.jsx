@@ -10,7 +10,6 @@ import AddUserModal from "./AddUserModal";
 import SettingsModal from "./SettingsModal";
 import ProfileModal from "./ProfileModal";
 import MediaLightbox from "./MediaLightbox";
-import UploadProgress from "./UploadProgress";
 
 /**
  * Main Chat Application Entry Point.
@@ -45,16 +44,15 @@ const ChatFlow = () => {
     id: null, name: "User", email: "loading...", avatar: "U", status: "online"
   });
 
-  // --- Logic Layer (Socket, State, Persistence) ---
+  // --- Logic Layer ---
   const {
     socket,
     contacts,
     messagesData,
     handleSendMessage,
     handleAttachmentSubmit,
-    uploadProgress,
   } = useChatCore(
-    myProfile, setMyProfile, activeChat, setActiveChat, 
+    myProfile, setMyProfile, activeChat, setActiveChat,
     setAddUserStatus, setIsAddUserModalOpen, setAddUserEmail
   );
 
@@ -98,33 +96,32 @@ const ChatFlow = () => {
 
   return (
     <div className={`flex h-screen font-sans bg-gray-900 text-gray-100 overflow-hidden relative ${!settings.darkMode ? 'light-theme-active' : ''}`}
-         style={{ backgroundImage: 'radial-gradient(circle at 50% 0%, #1f2937, #0B0F19 70%)' }}>
+      style={{ backgroundImage: 'radial-gradient(circle at 50% 0%, #1f2937, #0B0F19 70%)' }}>
 
       {/* Global Overlays */}
       <MediaLightbox media={viewingMedia} onClose={() => setViewingMedia(null)} />
-      <UploadProgress uploadProgress={uploadProgress} />
 
       {/* Modals */}
-      <AddUserModal 
+      <AddUserModal
         isOpen={isAddUserModalOpen} onClose={() => setIsAddUserModalOpen(false)}
         email={addUserEmail} setEmail={setAddUserEmail}
         status={addUserStatus} setStatus={setAddUserStatus}
         onAdd={handleAddByEmail}
       />
-      
-      <SettingsModal 
+
+      <SettingsModal
         isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)}
         settings={settings} setSettings={setSettings}
       />
-      <ProfileModal 
+      <ProfileModal
         isOpen={isProfileModalOpen} onClose={() => setIsProfileModalOpen(false)}
         user={myProfile}
         setMyProfile={setMyProfile}
         socket={socket}
       />
-      
+
       {/* Main Layout Sections */}
-      <ChatSidebar 
+      <ChatSidebar
         activeTab={activeTab} setActiveTab={setActiveTab}
         activeChat={activeChat} setActiveChat={setActiveChat}
         search={search} setSearch={setSearch}
@@ -141,15 +138,15 @@ const ChatFlow = () => {
       />
 
       {activeTab === 'groups' && (
-         <div className="w-[280px] bg-[#0E1321] border-r border-gray-800 hidden lg:flex flex-col z-10 shadow-xl">
-            <div className="h-[88px] border-b border-gray-800 px-6 flex items-center bg-[#0E1321] sticky top-0 z-10">
-               <h2 className="text-base font-bold text-white uppercase tracking-wider">Group Context</h2>
-            </div>
-            <div className="flex-1 p-6 text-gray-500 text-sm italic">Select a group to see context...</div>
-         </div>
+        <div className="w-[280px] bg-[#0E1321] border-r border-gray-800 hidden lg:flex flex-col z-10 shadow-xl">
+          <div className="h-[88px] border-b border-gray-800 px-6 flex items-center bg-[#0E1321] sticky top-0 z-10">
+            <h2 className="text-base font-bold text-white uppercase tracking-wider">Group Context</h2>
+          </div>
+          <div className="flex-1 p-6 text-gray-500 text-sm italic">Select a group to see context...</div>
+        </div>
       )}
 
-      <ChatWindow 
+      <ChatWindow
         currentContact={currentContact} currentMessages={currentMessages}
         messageInput={messageInput} setMessageInput={setMessageInput}
         handleSendMessage={(params) => handleSendMessage(messageInput, setMessageInput, params)}
@@ -163,7 +160,7 @@ const ChatFlow = () => {
         settings={settings} getProfilePic={resolveMediaURL}
       />
 
-      <ContactPanel 
+      <ContactPanel
         showContactInfo={showContactInfo} setShowContactInfo={setShowContactInfo}
         currentContact={currentContact} myProfile={myProfile}
       />
@@ -171,13 +168,13 @@ const ChatFlow = () => {
       {/* Immersive Status View */}
       {viewingStatus && (
         <div className="fixed inset-0 z-[500] bg-black/95 flex flex-col items-center justify-center animate-fade-in" onClick={() => setViewingStatus(null)}>
-           <h2 className="text-white text-3xl font-bold tracking-tight">{viewingStatus.name}'s Status</h2>
-           <p className="text-gray-400 mt-2 uppercase tracking-widest text-[10px] font-black">Immersion View Active</p>
-           <button onClick={() => setViewingStatus(null)} className="mt-12 px-8 py-3 bg-white/10 hover:bg-white/20 text-white rounded-2xl transition-all border border-white/10 backdrop-blur-md">Close Immersion</button>
+          <h2 className="text-white text-3xl font-bold tracking-tight">{viewingStatus.name}'s Status</h2>
+          <p className="text-gray-400 mt-2 uppercase tracking-widest text-[10px] font-black">Immersion View Active</p>
+          <button onClick={() => setViewingStatus(null)} className="mt-12 px-8 py-3 bg-white/10 hover:bg-white/20 text-white rounded-2xl transition-all border border-white/10 backdrop-blur-md">Close Immersion</button>
         </div>
       )}
     </div>
   );
 };
 
-export default ChatFlow;
+export default ChatFlow;  

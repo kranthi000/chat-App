@@ -1,5 +1,4 @@
 import React, { useState, useRef, useEffect } from "react";
-import { compressImage } from "../../services/chatUtils";
 
 /**
  * Premium Profile Modal: Centers user info prominently.
@@ -32,11 +31,10 @@ const ProfileModal = ({ isOpen, onClose, user, setMyProfile, socket }) => {
     reader.onload = async (event) => {
       try {
         const base4String = event.target.result;
-        const compressed = await compressImage(base4String);
-        setTempAvatar(compressed);
+        setTempAvatar(base4String);
       } catch (err) {
-        console.error("Image compression failed:", err);
-        setTempAvatar(event.target.result); // Fallback
+        console.error("Image processing failed:", err);
+        setTempAvatar(event.target.result); 
       }
     };
     reader.readAsDataURL(file);
