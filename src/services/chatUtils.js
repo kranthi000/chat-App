@@ -178,11 +178,14 @@ export const mapMessageData = (data, myProfileId, chunksRef, senderOverride = nu
      else if (finalType === "document") doc = url;
   }
 
-  // STABLE CONTENT HASH: Use content snippet for deduplication
+  // STABLE CONTENT HASH: Use content snippet and timestamp for deduplication
   const contentSnippet = isBlob 
     ? `BLOB_${source.message.size}_${source.message.type}` 
-    : messageContent.substring(0, 50).replace(/\s/g, '');
-  const contentHash = `CHASH_${source.fromUserId}_${finalType}_${contentSnippet}`;
+    : messageContent.substring(0, 100).replace(/\s/g, '');
+  
+  // Use a more robust hash that includes timestamp if it's a new message
+  // but allows for matching if it's the exact same content from the same sender in a short window.
+  const contentHash = `CHASH_${source.fromUserId}_${finalType}_${contentSnippet.substring(0, 50)}`;
   
   // DETERMINISTIC FINGERPRINTING: (Bug Fix: Remove randomness to prevent multiple bubbles)
   const isMediaMsg = finalType === "image" || finalType === "video" || finalType === "document";

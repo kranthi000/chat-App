@@ -13,11 +13,13 @@
 
 import React from 'react'
 import { RouterProvider } from 'react-router-dom'
+import { Toaster } from 'react-hot-toast'
 import routes from './routes/Routes'
 
 const App = () => {
   return (
     <>
+        <Toaster position="top-right" />
         <RouterProvider router={routes}></RouterProvider>
     </>
   )

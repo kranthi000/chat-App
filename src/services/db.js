@@ -147,3 +147,19 @@ export const deletePendingMessage = async (id) => {
   });
 };
 
+/**
+ * Clear all data from IndexedDB
+ */
+export const clearAllData = async () => {
+  const db = await initDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(["contacts", "messages", "pending"], "readwrite");
+    transaction.oncomplete = () => resolve(true);
+    transaction.onerror = (event) => reject(event.target.error);
+
+    transaction.objectStore("contacts").clear();
+    transaction.objectStore("messages").clear();
+    transaction.objectStore("pending").clear();
+  });
+};
+

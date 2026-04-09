@@ -144,6 +144,7 @@ function Field({ icon, placeholder, type, value, onChange, suffix }) {
         onChange={onChange}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
+        autoComplete={type === "password" ? "current-password" : (type === "email" ? "username" : "off")}
         style={s.fieldInput}
       />
       {suffix}
@@ -216,9 +217,17 @@ export default function Login() {
       }
     } catch (error) {
       console.error("Login component error:", error);
+      setLoading(false);
       
-      // Pull specific error message from server if available
-      const serverMessage = error.response?.data?.message || "Invalid email or password. Please try again.";
+      let serverMessage = "Invalid email or password. Please try again.";
+      
+      // Handle Network Errors (like ERR_INTERNET_DISCONNECTED or server down)
+      if (!error.response) {
+        serverMessage = "Server is unreachable. Please check your internet connection or try again later.";
+      } else if (error.response.data?.message) {
+        serverMessage = error.response.data.message;
+      }
+      
       alert(serverMessage);
     }
   }
